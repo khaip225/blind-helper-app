@@ -1,0 +1,132 @@
+<!-- public/index.html -->
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WebRTC Demo</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; margin: 10px; }
+    video { width: 48%; border: 1px solid #ddd; border-radius: 8px; }
+    #controls { margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h2>WebRTC demo (1:1)</h2>
+  <div>
+    <input id="roomInput" placeholder="room name (e.g. testroom)" />
+    <button id="joinBtn">Join</button>
+  </div>
+
+  <div id="videos" style="margin-top:12px;">
+    <video id="localVideo" autoplay playsinline muted></video>
+    <video id="remoteVideo" autoplay playsinline></video>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+
+    let pc = null;
+    let localStream = null;
+    let roomName = null;
+
+    const servers = {
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" }
+        // For production add TURN servers here
+      ]
+    };
+
+    const constraints = { audio: true, video: true };
+
+    const localVideo = document.getElementById("localVideo");
+    const remoteVideo = document.getElementById("remoteVideo");
+    const joinBtn = document.getElementById("joinBtn");
+    const roomInput = document.getElementById("roomInput");
+
+    joinBtn.onclick = async () => {
+      roomName = (roomInput.value || "default").trim();
+      if (!roomName) return alert("Nhập tên room");
+      console.log("Joining", roomName);
+      socket.emit("join", roomName);
+    };
+
+    socket.on("created", async () => {
+      console.log("created (you are first)");
+      await startLocalStream();
+      // wait for second peer
+    });
+
+    socket.on("joined", async () => {
+      console.log("joined (you are second) -> create offer");
+      await startLocalStream();
+      createPeerConnection();
+      localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit("offer", { room: roomName, desc: offer });
+    });
+
+    socket.on("ready", () => {
+      console.log("peer ready (someone joined)");
+      // no action here in this flow
+    });
+
+    socket.on("offer", async (desc) => {
+      console.log("received offer");
+      if (!localStream) await startLocalStream();
+      createPeerConnection();
+      localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+      await pc.setRemoteDescription(new RTCSessionDescription(desc));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit("answer", { room: roomName, desc: answer });
+    });
+
+    socket.on("answer", async (desc) => {
+      console.log("received answer");
+      await pc.setRemoteDescription(new RTCSessionDescription(desc));
+    });
+
+    socket.on("candidate", async (candidate) => {
+      console.log("received candidate", candidate);
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.warn("addIceCandidate error", e);
+      }
+    });
+
+    async function startLocalStream() {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        localVideo.srcObject = localStream;
+      } catch (err) {
+        console.error("getUserMedia error", err);
+        alert("Không thể truy cập camera/micro: " + err.message);
+      }
+    }
+
+    function createPeerConnection() {
+      if (pc) return;
+      pc = new RTCPeerConnection(servers);
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("candidate", { room: roomName, candidate: event.candidate });
+        }
+      };
+
+      pc.ontrack = (event) => {
+        console.log("track event", event);
+        remoteVideo.srcObject = event.streams[0];
+      };
+
+      pc.onconnectionstatechange = () => {
+        console.log("pc state:", pc.connectionState);
+      };
+    }
+  </script>
+</body>
+</html>
