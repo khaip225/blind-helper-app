@@ -28,7 +28,8 @@ const SosScreen = () => {
     : defaultCoords;
 
   const handleCall = () => {
-    router.push('/call');
+    // Trong SOS, thiết bị gửi offer, app trả lời (incoming mode - default)
+    router.push('/call?mode=incoming');
   };
 
   return (

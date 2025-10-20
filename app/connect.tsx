@@ -10,22 +10,17 @@ export default function ConnectScreen() {
     const [deviceId, setDeviceId] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const router = useRouter();
-    const { connect, deviceOnline } = useMQTT();
+    // Lấy hàm connect và disconnect từ context mới
+    const { connect, disconnect } = useMQTT();
 
-    // Lắng nghe tin nhắn từ thiết bị để xác nhận kết nối
+    // Đảm bảo ngắt kết nối cũ khi vào màn hình này để reset
     useEffect(() => {
-        if (deviceOnline) {
-            console.log(`✅ Thiết bị ${deviceId} đã xác nhận online!`);
-            AsyncStorage.setItem("deviceId", deviceId).then(() => {
-                setIsLoading(false);
-                router.replace("/(tabs)");
-            });
-        }
-    }, [deviceOnline, deviceId, router]);
-
+        disconnect();
+    }, [disconnect]);
 
     const handleConnect = async () => {
-        if (deviceId.trim() === "") {
+        const trimmedDeviceId = deviceId.trim();
+        if (trimmedDeviceId === "") {
             Alert.alert("Lỗi", "Vui lòng nhập ID thiết bị.");
             return;
         }
@@ -33,22 +28,23 @@ export default function ConnectScreen() {
         setIsLoading(true);
 
         try {
-            // Gọi hàm connect từ context
-            await connect(deviceId.trim());
+            // Bước 1: Gọi hàm connect từ context. 
+            // Hàm này sẽ resolve (thành công) ngay khi kết nối đến broker xong.
+            await connect(trimmedDeviceId);
 
-            // Sau khi `connect` thành công, app sẽ lắng nghe tin nhắn "presence"
-            // Thiết lập một timeout để tránh chờ đợi vô hạn
-            setTimeout(() => {
-                // Nếu sau 10s vẫn chưa thấy thiết bị online, báo lỗi
-                if (!deviceOnline) {
-                    setIsLoading(false);
-                    Alert.alert("Lỗi", "Không nhận được phản hồi từ thiết bị. Vui lòng kiểm tra lại ID và đảm bảo thiết bị đang online.");
-                }
-            }, 10000); // Chờ 10 giây
+            // Bước 2: Nếu kết nối thành công, lưu ID và chuyển màn hình ngay lập tức.
+            await AsyncStorage.setItem("deviceId", trimmedDeviceId);
+            
+            setIsLoading(false);
+            router.replace("/(tabs)");
 
         } catch (error: any) {
+            // Nếu có lỗi trong quá trình kết nối đến broker, hiển thị lỗi
             setIsLoading(false);
-            Alert.alert("Kết nối thất bại", error.message || "Không thể kết nối đến MQTT broker. Vui lòng thử lại.");
+            Alert.alert(
+                "Kết nối thất bại", 
+                error.message || "Không thể kết nối đến MQTT broker. Vui lòng kiểm tra lại ID và kết nối mạng."
+            );
         }
     };
 
@@ -74,7 +70,7 @@ export default function ConnectScreen() {
                         onChangeText={setDeviceId}
                         style={styles.textInput}
                         placeholderTextColor="#999"
-                        placeholder="Nhập ID của Jetson Nano..."
+                        placeholder="Nhập ID của thiết bị..."
                         autoCapitalize="none"
                     />
                 </View>
@@ -95,6 +91,7 @@ export default function ConnectScreen() {
     );
 }
 
+// Giữ nguyên toàn bộ phần styles của bạn
 const styles = StyleSheet.create({
     container: {
         flex: 1,
@@ -173,3 +170,4 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
 });
+

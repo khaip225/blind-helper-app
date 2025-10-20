@@ -1,5 +1,7 @@
 // app/setting.tsx
+import { useMQTT } from "@/context/MQTTContext";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import React from "react";
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -7,6 +9,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function SettingScreen() {
   const router = useRouter();
+  const { disconnect } = useMQTT();
 
   const handleLogout = () => {
     Alert.alert(
@@ -16,9 +19,26 @@ export default function SettingScreen() {
         { text: "Hủy", style: "cancel" },
         {
           text: "Đồng ý",
-          onPress: () => {
-            // Reset stack, quay về màn hình connect.tsx
-            router.replace("/connect");
+          onPress: async () => {
+            try {
+              // 1. Disconnect MQTT
+              disconnect();
+              console.log("🔌 Đã ngắt kết nối MQTT");
+              
+              // 2. Xóa deviceId khỏi AsyncStorage
+              await AsyncStorage.removeItem("deviceId");
+              console.log("🗑️ Đã xóa deviceId khỏi AsyncStorage");
+              
+              // 3. Small delay để đảm bảo cleanup hoàn tất
+              await new Promise(resolve => setTimeout(resolve, 100));
+              
+              // 4. Navigate về connect screen
+              router.replace("/connect");
+              console.log("➡️ Đã chuyển về /connect");
+            } catch (error) {
+              console.error("❌ Lỗi khi đăng xuất:", error);
+              Alert.alert("Lỗi", "Không thể đăng xuất. Vui lòng thử lại.");
+            }
           },
         },
       ]

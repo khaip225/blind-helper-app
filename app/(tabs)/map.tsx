@@ -9,7 +9,7 @@ import { useMQTT } from "../../context/MQTTContext";
 
 export default function MapScreen() {
     const router = useRouter();
-    const { deviceInfo, isConnected } = useMQTT();
+    const { deviceInfo, isConnected, startCall } = useMQTT();
     const [deviceId, setDeviceId] = React.useState<string | null>(null);
 
     React.useEffect(() => {
@@ -20,8 +20,11 @@ export default function MapScreen() {
         getDeviceId();
     }, []);
 
-    const handleVideoCall = () => {
-        router.push('/call');
+    const handleVideoCall = async () => {
+        if (!isConnected) return;
+        // Thực hiện signaling: tạo Offer và gửi qua MQTT, sau đó chuyển sang màn hình call
+        await startCall();
+        router.push('/call?mode=outgoing');
     };
 
     // Default location (Đà Nẵng) nếu chưa có GPS
