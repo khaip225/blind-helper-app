@@ -5,6 +5,7 @@ import platform
 import sys
 import threading
 from collections import deque
+import os
 
 import aioice.stun
 import paho.mqtt.client as mqtt
@@ -38,6 +39,11 @@ def is_private_address(addr):
     return False
 
 aioice.stun.is_private_address = is_private_address
+
+# Ensure ALSA uses system config on Linux to avoid 'Unknown PCM' due to bad env
+if platform.system() == "Linux":
+    os.environ.setdefault("ALSA_CONFIG_PATH", "/usr/share/alsa/alsa.conf")
+    os.environ.setdefault("ALSA_CONFIG_DIR", "/usr/share/alsa")
 
 # --- Cấu hình logging ---
 logging.basicConfig(level=logging.INFO)
@@ -299,28 +305,61 @@ async def initialize_peer_connection():
             logger.error("❌ Could not open any camera device!")
             return
         
-        # Linux: Audio device (separate for Jetson Nano)
+        # Linux (Jetson Nano): Audio device selection
         if platform.system() == "Linux":
-            # Try pulse audio first, then ALSA
-            audio_options = {"channels": "1", "sample_rate": "48000"}
-            try:
-                # Try PulseAudio (easier on Jetson)
-                audio_player = MediaPlayer("default", format="pulse", options=audio_options)
-                logger.info("🎤 Using PulseAudio for microphone")
-            except Exception as e1:
-                logger.warning(f"PulseAudio not available: {e1}")
+            # Try PulseAudio first (if available), then ALSA with your USB card (card 3)
+            channels = os.environ.get("MIC_CHANNELS", "1")
+            sample_rate = os.environ.get("MIC_RATE", "48000")
+            audio_options = {"channels": channels, "sample_rate": sample_rate}
+
+            # Allow override via env, e.g. MIC_DEVICE=plughw:3,0 or MIC_DEVICE=sysdefault:CARD=Device_1
+            mic_env = os.environ.get("MIC_DEVICE") or os.environ.get("AUDIO_INPUT")
+            if mic_env:
                 try:
-                    # Try ALSA hw:0,0
-                    audio_player = MediaPlayer("hw:0,0", format="alsa", options=audio_options)
-                    logger.info("🎤 Using ALSA hw:0,0 for microphone")
-                except Exception as e2:
-                    logger.warning(f"ALSA hw:0,0 not available: {e2}")
+                    if mic_env.startswith(("hw:", "plughw:", "sysdefault:", "dsnoop:", "hw:CARD=", "plughw:CARD=")):
+                        audio_player = MediaPlayer(mic_env, format="alsa", options=audio_options)
+                        logger.info(f"🎤 Using ALSA device from env: {mic_env}")
+                    else:
+                        audio_player = MediaPlayer(mic_env, format="pulse", options=audio_options)
+                        logger.info(f"🎤 Using PulseAudio source from env: {mic_env}")
+                except Exception as e:
+                    logger.warning(f"Env audio device '{mic_env}' failed: {e}")
+                    audio_player = None
+
+            # PulseAudio default source
+            if not audio_player:
+                try:
+                    audio_player = MediaPlayer("default", format="pulse", options=audio_options)
+                    logger.info("🎤 Using PulseAudio default microphone")
+                except Exception as e1:
+                    logger.warning(f"PulseAudio not available: {e1}")
+                    audio_player = None
+
+            # ALSA: prefer your USB on card 3, device 0
+            if not audio_player:
+                alsa_candidates = [
+                    "plughw:3,0",  # USB Audio Device (card 3)
+                    "hw:3,0",
+                    "sysdefault:CARD=Device_1",
+                    "dsnoop:CARD=Device_1,DEV=0",
+                    # Fallback to another USB you have (card 2)
+                    "plughw:2,0",
+                    "hw:2,0",
+                    "sysdefault:CARD=Device",
+                    "dsnoop:CARD=Device,DEV=0",
+                ]
+                last_err = None
+                for dev in alsa_candidates:
                     try:
-                        # Try plughw:0,0 (with automatic conversion)
-                        audio_player = MediaPlayer("plughw:0,0", format="alsa", options=audio_options)
-                        logger.info("🎤 Using ALSA plughw:0,0 for microphone")
-                    except Exception as e3:
-                        logger.warning(f"Could not open any audio device: {e3}")
+                        audio_player = MediaPlayer(dev, format="alsa", options=audio_options)
+                        logger.info(f"🎤 Using ALSA microphone: {dev}")
+                        break
+                    except Exception as e:
+                        last_err = e
+                        logger.debug(f"ALSA try {dev} failed: {e}")
+                        audio_player = None
+                if not audio_player:
+                    logger.warning(f"Could not open any ALSA audio device: {last_err}")
 
     # Create peer connection with UPDATED ICE servers
     try:
