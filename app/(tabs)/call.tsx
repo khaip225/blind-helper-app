@@ -2,10 +2,10 @@ import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
 import React, { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { RTCView } from 'react-native-webrtc';
-import { useMQTT } from '../../context/MQTTContext';
+import { useWebRTC } from '../../context/WebRTCContext';
 
 export default function CallScreen() {
-    const { localStream, remoteStream, hangup, callState, answerCall } = useMQTT();
+    const { localStream, remoteStream, hangup, callState, answerCall } = useWebRTC();
     const router = useRouter();
     const navigation = useNavigation();
 

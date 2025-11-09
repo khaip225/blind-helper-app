@@ -1,0 +1,644 @@
+[
+    {
+        "label": "json",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "json",
+        "description": "json",
+        "detail": "json",
+        "documentation": {}
+    },
+    {
+        "label": "sys",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "sys",
+        "description": "sys",
+        "detail": "sys",
+        "documentation": {}
+    },
+    {
+        "label": "asyncio",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "asyncio",
+        "description": "asyncio",
+        "detail": "asyncio",
+        "documentation": {}
+    },
+    {
+        "label": "logging",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "logging",
+        "description": "logging",
+        "detail": "logging",
+        "documentation": {}
+    },
+    {
+        "label": "pyaudio",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "pyaudio",
+        "description": "pyaudio",
+        "detail": "pyaudio",
+        "documentation": {}
+    },
+    {
+        "label": "struct",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "struct",
+        "description": "struct",
+        "detail": "struct",
+        "documentation": {}
+    },
+    {
+        "label": "av",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "av",
+        "description": "av",
+        "detail": "av",
+        "documentation": {}
+    },
+    {
+        "label": "AudioFrame",
+        "importPath": "av",
+        "description": "av",
+        "isExtraImport": true,
+        "detail": "av",
+        "documentation": {}
+    },
+    {
+        "label": "MediaStreamTrack",
+        "importPath": "aiortc",
+        "description": "aiortc",
+        "isExtraImport": true,
+        "detail": "aiortc",
+        "documentation": {}
+    },
+    {
+        "label": "RTCPeerConnection",
+        "importPath": "aiortc",
+        "description": "aiortc",
+        "isExtraImport": true,
+        "detail": "aiortc",
+        "documentation": {}
+    },
+    {
+        "label": "RTCSessionDescription",
+        "importPath": "aiortc",
+        "description": "aiortc",
+        "isExtraImport": true,
+        "detail": "aiortc",
+        "documentation": {}
+    },
+    {
+        "label": "RTCIceCandidate",
+        "importPath": "aiortc",
+        "description": "aiortc",
+        "isExtraImport": true,
+        "detail": "aiortc",
+        "documentation": {}
+    },
+    {
+        "label": "RTCPeerConnection",
+        "importPath": "aiortc",
+        "description": "aiortc",
+        "isExtraImport": true,
+        "detail": "aiortc",
+        "documentation": {}
+    },
+    {
+        "label": "RTCSessionDescription",
+        "importPath": "aiortc",
+        "description": "aiortc",
+        "isExtraImport": true,
+        "detail": "aiortc",
+        "documentation": {}
+    },
+    {
+        "label": "RTCIceCandidate",
+        "importPath": "aiortc",
+        "description": "aiortc",
+        "isExtraImport": true,
+        "detail": "aiortc",
+        "documentation": {}
+    },
+    {
+        "label": "platform",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "platform",
+        "description": "platform",
+        "detail": "platform",
+        "documentation": {}
+    },
+    {
+        "label": "threading",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "threading",
+        "description": "threading",
+        "detail": "threading",
+        "documentation": {}
+    },
+    {
+        "label": "deque",
+        "importPath": "collections",
+        "description": "collections",
+        "isExtraImport": true,
+        "detail": "collections",
+        "documentation": {}
+    },
+    {
+        "label": "deque",
+        "importPath": "collections",
+        "description": "collections",
+        "isExtraImport": true,
+        "detail": "collections",
+        "documentation": {}
+    },
+    {
+        "label": "aioice.stun",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "aioice.stun",
+        "description": "aioice.stun",
+        "detail": "aioice.stun",
+        "documentation": {}
+    },
+    {
+        "label": "paho.mqtt.client",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "paho.mqtt.client",
+        "description": "paho.mqtt.client",
+        "detail": "paho.mqtt.client",
+        "documentation": {}
+    },
+    {
+        "label": "MediaPlayer",
+        "importPath": "aiortc.contrib.media",
+        "description": "aiortc.contrib.media",
+        "isExtraImport": true,
+        "detail": "aiortc.contrib.media",
+        "documentation": {}
+    },
+    {
+        "label": "MediaRecorder",
+        "importPath": "aiortc.contrib.media",
+        "description": "aiortc.contrib.media",
+        "isExtraImport": true,
+        "detail": "aiortc.contrib.media",
+        "documentation": {}
+    },
+    {
+        "label": "MediaPlayer",
+        "importPath": "aiortc.contrib.media",
+        "description": "aiortc.contrib.media",
+        "isExtraImport": true,
+        "detail": "aiortc.contrib.media",
+        "documentation": {}
+    },
+    {
+        "label": "MediaRecorder",
+        "importPath": "aiortc.contrib.media",
+        "description": "aiortc.contrib.media",
+        "isExtraImport": true,
+        "detail": "aiortc.contrib.media",
+        "documentation": {}
+    },
+    {
+        "label": "os",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "os",
+        "description": "os",
+        "detail": "os",
+        "documentation": {}
+    },
+    {
+        "label": "fractions",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "fractions",
+        "description": "fractions",
+        "detail": "fractions",
+        "documentation": {}
+    },
+    {
+        "label": "queue",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "queue",
+        "description": "queue",
+        "detail": "queue",
+        "documentation": {}
+    },
+    {
+        "label": "time",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "time",
+        "description": "time",
+        "detail": "time",
+        "documentation": {}
+    },
+    {
+        "label": "MediaStreamTrack",
+        "importPath": "aiortc.mediastreams",
+        "description": "aiortc.mediastreams",
+        "isExtraImport": true,
+        "detail": "aiortc.mediastreams",
+        "documentation": {}
+    },
+    {
+        "label": "numpy",
+        "kind": 6,
+        "isExtraImport": true,
+        "importPath": "numpy",
+        "description": "numpy",
+        "detail": "numpy",
+        "documentation": {}
+    },
+    {
+        "label": "_Known",
+        "kind": 6,
+        "importPath": "node_modules.flatted.python.flatted",
+        "description": "node_modules.flatted.python.flatted",
+        "peekOfCode": "class _Known:\n    def __init__(self):\n        self.key = []\n        self.value = []\nclass _String:\n    def __init__(self, value):\n        self.value = value\ndef _array_keys(value):\n    keys = []\n    i = 0",
+        "detail": "node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "_String",
+        "kind": 6,
+        "importPath": "node_modules.flatted.python.flatted",
+        "description": "node_modules.flatted.python.flatted",
+        "peekOfCode": "class _String:\n    def __init__(self, value):\n        self.value = value\ndef _array_keys(value):\n    keys = []\n    i = 0\n    for _ in value:\n        keys.append(i)\n        i += 1\n    return keys",
+        "detail": "node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "parse",
+        "kind": 2,
+        "importPath": "node_modules.flatted.python.flatted",
+        "description": "node_modules.flatted.python.flatted",
+        "peekOfCode": "def parse(value, *args, **kwargs):\n    json = _json.loads(value, *args, **kwargs)\n    wrapped = []\n    for value in json:\n        wrapped.append(_wrap(value))\n    input = []\n    for value in wrapped:\n        if isinstance(value, _String):\n            input.append(value.value)\n        else:",
+        "detail": "node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "stringify",
+        "kind": 2,
+        "importPath": "node_modules.flatted.python.flatted",
+        "description": "node_modules.flatted.python.flatted",
+        "peekOfCode": "def stringify(value, *args, **kwargs):\n    known = _Known()\n    input = []\n    output = []\n    i = int(_index(known, input, value))\n    while i < len(input):\n        output.append(_transform(known, input, input[i]))\n        i += 1\n    return _json.dumps(output, *args, **kwargs)",
+        "detail": "node_modules.flatted.python.flatted",
+        "documentation": {}
+    },
+    {
+        "label": "PyAudioTrack",
+        "kind": 6,
+        "importPath": "pyaudio_track",
+        "description": "pyaudio_track",
+        "peekOfCode": "class PyAudioTrack(MediaStreamTrack):\n    \"\"\"\n    Audio track that captures audio from the default microphone using PyAudio.\n    Works more reliably on Windows than DirectShow.\n    \"\"\"\n    kind = \"audio\"\n    def __init__(self, sample_rate=48000, channels=1, chunk_size=960):\n        super().__init__()\n        self.sample_rate = sample_rate\n        self.channels = channels",
+        "detail": "pyaudio_track",
+        "documentation": {}
+    },
+    {
+        "label": "list_audio_devices",
+        "kind": 2,
+        "importPath": "pyaudio_track",
+        "description": "pyaudio_track",
+        "peekOfCode": "def list_audio_devices():\n    \"\"\"List all available audio input devices\"\"\"\n    audio = pyaudio.PyAudio()\n    print(\"\\n🎤 Available Audio Input Devices:\")\n    print(\"=\" * 60)\n    for i in range(audio.get_device_count()):\n        info = audio.get_device_info_by_index(i)\n        if info['maxInputChannels'] > 0:\n            is_default = \" (DEFAULT)\" if i == audio.get_default_input_device_info()['index'] else \"\"\n            print(f\"[{i}] {info['name']}{is_default}\")",
+        "detail": "pyaudio_track",
+        "documentation": {}
+    },
+    {
+        "label": "logger",
+        "kind": 5,
+        "importPath": "pyaudio_track",
+        "description": "pyaudio_track",
+        "peekOfCode": "logger = logging.getLogger(\"pyaudio_track\")\nclass PyAudioTrack(MediaStreamTrack):\n    \"\"\"\n    Audio track that captures audio from the default microphone using PyAudio.\n    Works more reliably on Windows than DirectShow.\n    \"\"\"\n    kind = \"audio\"\n    def __init__(self, sample_rate=48000, channels=1, chunk_size=960):\n        super().__init__()\n        self.sample_rate = sample_rate",
+        "detail": "pyaudio_track",
+        "documentation": {}
+    },
+    {
+        "label": "is_private_address",
+        "kind": 2,
+        "importPath": "webrtc_device_simulator",
+        "description": "webrtc_device_simulator",
+        "peekOfCode": "def is_private_address(addr):\n    if addr.startswith(\"10.\") or addr.startswith(\"192.168.\"):\n        return True\n    if addr.startswith(\"172.\"):\n        try:\n            second_octet = int(addr.split(\".\")[1])\n            return 16 <= second_octet <= 31\n        except:\n            return False\n    return False",
+        "detail": "webrtc_device_simulator",
+        "documentation": {}
+    },
+    {
+        "label": "on_connect",
+        "kind": 2,
+        "importPath": "webrtc_device_simulator",
+        "description": "webrtc_device_simulator",
+        "peekOfCode": "def on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):\n        logger.error(f\"Failed to connect to MQTT: {reason_code}\")\n        return\n    logger.info(f\"MQTT Connected with reason code {reason_code}\")\n    topics = [\n        f\"mobile/{DEVICE_ID}/webrtc/offer\",\n        f\"mobile/{DEVICE_ID}/webrtc/answer\",\n        f\"mobile/{DEVICE_ID}/webrtc/candidate\",\n    ]",
+        "detail": "webrtc_device_simulator",
+        "documentation": {}
+    },
+    {
+        "label": "on_message",
+        "kind": 2,
+        "importPath": "webrtc_device_simulator",
+        "description": "webrtc_device_simulator",
+        "peekOfCode": "def on_message(client, userdata, msg):\n    if MAIN_LOOP and MAIN_LOOP.is_running():\n        asyncio.run_coroutine_threadsafe(\n            handle_message_async(msg.topic, msg.payload.decode()),\n            MAIN_LOOP,\n        )\n    else:\n        logger.error(\"Main asyncio loop is not available. Dropping MQTT message.\")\nasync def initialize_peer_connection():\n    global pc, player, audio_player, audio_track",
+        "detail": "webrtc_device_simulator",
+        "documentation": {}
+    },
+    {
+        "label": "PYAUDIO_AVAILABLE",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator",
+        "description": "webrtc_device_simulator",
+        "peekOfCode": "PYAUDIO_AVAILABLE = False\nif platform.system() == \"Windows\":\n    try:\n        from pyaudio_track import PyAudioTrack\n        PYAUDIO_AVAILABLE = True\n    except ImportError:\n        pass  # Will try DirectShow fallback\n# Fix STUN private address check\ndef is_private_address(addr):\n    if addr.startswith(\"10.\") or addr.startswith(\"192.168.\"):",
+        "detail": "webrtc_device_simulator",
+        "documentation": {}
+    },
+    {
+        "label": "aioice.stun.is_private_address",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator",
+        "description": "webrtc_device_simulator",
+        "peekOfCode": "aioice.stun.is_private_address = is_private_address\n# --- Cấu hình logging ---\nlogging.basicConfig(level=logging.INFO)\nlogger = logging.getLogger(\"webrtc_simulator\")\n# --- Biến toàn cục ---\nclient = None\npc = None\nplayer = None\naudio_player = None\naudio_track = None  # PyAudio track for Windows microphone",
+        "detail": "webrtc_device_simulator",
+        "documentation": {}
+    },
+    {
+        "label": "logger",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator",
+        "description": "webrtc_device_simulator",
+        "peekOfCode": "logger = logging.getLogger(\"webrtc_simulator\")\n# --- Biến toàn cục ---\nclient = None\npc = None\nplayer = None\naudio_player = None\naudio_track = None  # PyAudio track for Windows microphone\nrecorder = None  # For recording incoming audio to verify reception\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None",
+        "detail": "webrtc_device_simulator",
+        "documentation": {}
+    },
+    {
+        "label": "client",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator",
+        "description": "webrtc_device_simulator",
+        "peekOfCode": "client = None\npc = None\nplayer = None\naudio_player = None\naudio_track = None  # PyAudio track for Windows microphone\nrecorder = None  # For recording incoming audio to verify reception\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()\ndef on_connect(client, userdata, flags, reason_code, properties):",
+        "detail": "webrtc_device_simulator",
+        "documentation": {}
+    },
+    {
+        "label": "pc",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator",
+        "description": "webrtc_device_simulator",
+        "peekOfCode": "pc = None\nplayer = None\naudio_player = None\naudio_track = None  # PyAudio track for Windows microphone\nrecorder = None  # For recording incoming audio to verify reception\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()\ndef on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):",
+        "detail": "webrtc_device_simulator",
+        "documentation": {}
+    },
+    {
+        "label": "player",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator",
+        "description": "webrtc_device_simulator",
+        "peekOfCode": "player = None\naudio_player = None\naudio_track = None  # PyAudio track for Windows microphone\nrecorder = None  # For recording incoming audio to verify reception\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()\ndef on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):\n        logger.error(f\"Failed to connect to MQTT: {reason_code}\")",
+        "detail": "webrtc_device_simulator",
+        "documentation": {}
+    },
+    {
+        "label": "audio_player",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator",
+        "description": "webrtc_device_simulator",
+        "peekOfCode": "audio_player = None\naudio_track = None  # PyAudio track for Windows microphone\nrecorder = None  # For recording incoming audio to verify reception\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()\ndef on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):\n        logger.error(f\"Failed to connect to MQTT: {reason_code}\")\n        return",
+        "detail": "webrtc_device_simulator",
+        "documentation": {}
+    },
+    {
+        "label": "audio_track",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator",
+        "description": "webrtc_device_simulator",
+        "peekOfCode": "audio_track = None  # PyAudio track for Windows microphone\nrecorder = None  # For recording incoming audio to verify reception\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()\ndef on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):\n        logger.error(f\"Failed to connect to MQTT: {reason_code}\")\n        return\n    logger.info(f\"MQTT Connected with reason code {reason_code}\")",
+        "detail": "webrtc_device_simulator",
+        "documentation": {}
+    },
+    {
+        "label": "recorder",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator",
+        "description": "webrtc_device_simulator",
+        "peekOfCode": "recorder = None  # For recording incoming audio to verify reception\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()\ndef on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):\n        logger.error(f\"Failed to connect to MQTT: {reason_code}\")\n        return\n    logger.info(f\"MQTT Connected with reason code {reason_code}\")\n    topics = [",
+        "detail": "webrtc_device_simulator",
+        "documentation": {}
+    },
+    {
+        "label": "DEVICE_ID",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator",
+        "description": "webrtc_device_simulator",
+        "peekOfCode": "DEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()\ndef on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):\n        logger.error(f\"Failed to connect to MQTT: {reason_code}\")\n        return\n    logger.info(f\"MQTT Connected with reason code {reason_code}\")\n    topics = [\n        f\"mobile/{DEVICE_ID}/webrtc/offer\",",
+        "detail": "webrtc_device_simulator",
+        "documentation": {}
+    },
+    {
+        "label": "pending_ice_candidates",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator",
+        "description": "webrtc_device_simulator",
+        "peekOfCode": "pending_ice_candidates = deque()\ndef on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):\n        logger.error(f\"Failed to connect to MQTT: {reason_code}\")\n        return\n    logger.info(f\"MQTT Connected with reason code {reason_code}\")\n    topics = [\n        f\"mobile/{DEVICE_ID}/webrtc/offer\",\n        f\"mobile/{DEVICE_ID}/webrtc/answer\",\n        f\"mobile/{DEVICE_ID}/webrtc/candidate\",",
+        "detail": "webrtc_device_simulator",
+        "documentation": {}
+    },
+    {
+        "label": "is_private_address",
+        "kind": 2,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "def is_private_address(addr):\n    if addr.startswith(\"10.\") or addr.startswith(\"192.168.\"):\n        return True\n    if addr.startswith(\"172.\"):\n        try:\n            second_octet = int(addr.split(\".\")[1])\n            return 16 <= second_octet <= 31\n        except:\n            return False\n    return False",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "on_connect",
+        "kind": 2,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "def on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):\n        logger.error(f\"Failed to connect to MQTT: {reason_code}\")\n        return\n    logger.info(f\"MQTT Connected with reason code {reason_code}\")\n    topics = [\n        f\"mobile/{DEVICE_ID}/webrtc/offer\",\n        f\"mobile/{DEVICE_ID}/webrtc/answer\",\n        f\"mobile/{DEVICE_ID}/webrtc/candidate\",\n    ]",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "on_message",
+        "kind": 2,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "def on_message(client, userdata, msg):\n    if MAIN_LOOP and MAIN_LOOP.is_running():\n        asyncio.run_coroutine_threadsafe(\n            handle_message_async(msg.topic, msg.payload.decode()),\n            MAIN_LOOP,\n        )\n    else:\n        logger.error(\"Main asyncio loop is not available. Dropping MQTT message.\")\nasync def initialize_peer_connection():\n    global pc, player, audio_player, pyaudio_track",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "aioice.stun.is_private_address",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "aioice.stun.is_private_address = is_private_address\n# --- Cấu hình logging ---\nlogging.basicConfig(level=logging.INFO)\nlogger = logging.getLogger(\"webrtc_simulator\")\n# --- Biến toàn cục ---\nclient = None\npc = None\nplayer = None\naudio_player = None\nrecorder = None  # For recording incoming audio to verify reception",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "logger",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "logger = logging.getLogger(\"webrtc_simulator\")\n# --- Biến toàn cục ---\nclient = None\npc = None\nplayer = None\naudio_player = None\nrecorder = None  # For recording incoming audio to verify reception\npyaudio_track = None  # Optional PyAudio capture track\nplayback_task = None  # asyncio Task for playing incoming audio\n_pyaudio_out = None  # PyAudio instance for playback",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "client",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "client = None\npc = None\nplayer = None\naudio_player = None\nrecorder = None  # For recording incoming audio to verify reception\npyaudio_track = None  # Optional PyAudio capture track\nplayback_task = None  # asyncio Task for playing incoming audio\n_pyaudio_out = None  # PyAudio instance for playback\n_pyaudio_out_stream = None  # PyAudio output stream\nDEVICE_ID = \"jetson\"",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "pc",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "pc = None\nplayer = None\naudio_player = None\nrecorder = None  # For recording incoming audio to verify reception\npyaudio_track = None  # Optional PyAudio capture track\nplayback_task = None  # asyncio Task for playing incoming audio\n_pyaudio_out = None  # PyAudio instance for playback\n_pyaudio_out_stream = None  # PyAudio output stream\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "player",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "player = None\naudio_player = None\nrecorder = None  # For recording incoming audio to verify reception\npyaudio_track = None  # Optional PyAudio capture track\nplayback_task = None  # asyncio Task for playing incoming audio\n_pyaudio_out = None  # PyAudio instance for playback\n_pyaudio_out_stream = None  # PyAudio output stream\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "audio_player",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "audio_player = None\nrecorder = None  # For recording incoming audio to verify reception\npyaudio_track = None  # Optional PyAudio capture track\nplayback_task = None  # asyncio Task for playing incoming audio\n_pyaudio_out = None  # PyAudio instance for playback\n_pyaudio_out_stream = None  # PyAudio output stream\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()\n# Runtime flags (configurable via CLI or environment)",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "recorder",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "recorder = None  # For recording incoming audio to verify reception\npyaudio_track = None  # Optional PyAudio capture track\nplayback_task = None  # asyncio Task for playing incoming audio\n_pyaudio_out = None  # PyAudio instance for playback\n_pyaudio_out_stream = None  # PyAudio output stream\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()\n# Runtime flags (configurable via CLI or environment)\nFORCE_TURN = False",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "pyaudio_track",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "pyaudio_track = None  # Optional PyAudio capture track\nplayback_task = None  # asyncio Task for playing incoming audio\n_pyaudio_out = None  # PyAudio instance for playback\n_pyaudio_out_stream = None  # PyAudio output stream\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()\n# Runtime flags (configurable via CLI or environment)\nFORCE_TURN = False\nFORCE_IPV4 = False",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "playback_task",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "playback_task = None  # asyncio Task for playing incoming audio\n_pyaudio_out = None  # PyAudio instance for playback\n_pyaudio_out_stream = None  # PyAudio output stream\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()\n# Runtime flags (configurable via CLI or environment)\nFORCE_TURN = False\nFORCE_IPV4 = False\nTURN_URLS = []  # list of URLs (e.g., [\"turns:your.turn.server:443?transport=tcp\"])",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "_pyaudio_out",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "_pyaudio_out = None  # PyAudio instance for playback\n_pyaudio_out_stream = None  # PyAudio output stream\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()\n# Runtime flags (configurable via CLI or environment)\nFORCE_TURN = False\nFORCE_IPV4 = False\nTURN_URLS = []  # list of URLs (e.g., [\"turns:your.turn.server:443?transport=tcp\"])\nTURN_USERNAME = None",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "_pyaudio_out_stream",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "_pyaudio_out_stream = None  # PyAudio output stream\nDEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()\n# Runtime flags (configurable via CLI or environment)\nFORCE_TURN = False\nFORCE_IPV4 = False\nTURN_URLS = []  # list of URLs (e.g., [\"turns:your.turn.server:443?transport=tcp\"])\nTURN_USERNAME = None\nTURN_PASSWORD = None",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "DEVICE_ID",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "DEVICE_ID = \"jetson\"\nMAIN_LOOP: asyncio.AbstractEventLoop | None = None\npending_ice_candidates = deque()\n# Runtime flags (configurable via CLI or environment)\nFORCE_TURN = False\nFORCE_IPV4 = False\nTURN_URLS = []  # list of URLs (e.g., [\"turns:your.turn.server:443?transport=tcp\"])\nTURN_USERNAME = None\nTURN_PASSWORD = None\ndef on_connect(client, userdata, flags, reason_code, properties):",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "pending_ice_candidates",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "pending_ice_candidates = deque()\n# Runtime flags (configurable via CLI or environment)\nFORCE_TURN = False\nFORCE_IPV4 = False\nTURN_URLS = []  # list of URLs (e.g., [\"turns:your.turn.server:443?transport=tcp\"])\nTURN_USERNAME = None\nTURN_PASSWORD = None\ndef on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):\n        logger.error(f\"Failed to connect to MQTT: {reason_code}\")",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "FORCE_TURN",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "FORCE_TURN = False\nFORCE_IPV4 = False\nTURN_URLS = []  # list of URLs (e.g., [\"turns:your.turn.server:443?transport=tcp\"])\nTURN_USERNAME = None\nTURN_PASSWORD = None\ndef on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):\n        logger.error(f\"Failed to connect to MQTT: {reason_code}\")\n        return\n    logger.info(f\"MQTT Connected with reason code {reason_code}\")",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "FORCE_IPV4",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "FORCE_IPV4 = False\nTURN_URLS = []  # list of URLs (e.g., [\"turns:your.turn.server:443?transport=tcp\"])\nTURN_USERNAME = None\nTURN_PASSWORD = None\ndef on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):\n        logger.error(f\"Failed to connect to MQTT: {reason_code}\")\n        return\n    logger.info(f\"MQTT Connected with reason code {reason_code}\")\n    topics = [",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "TURN_URLS",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "TURN_URLS = []  # list of URLs (e.g., [\"turns:your.turn.server:443?transport=tcp\"])\nTURN_USERNAME = None\nTURN_PASSWORD = None\ndef on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):\n        logger.error(f\"Failed to connect to MQTT: {reason_code}\")\n        return\n    logger.info(f\"MQTT Connected with reason code {reason_code}\")\n    topics = [\n        f\"mobile/{DEVICE_ID}/webrtc/offer\",",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "TURN_USERNAME",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "TURN_USERNAME = None\nTURN_PASSWORD = None\ndef on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):\n        logger.error(f\"Failed to connect to MQTT: {reason_code}\")\n        return\n    logger.info(f\"MQTT Connected with reason code {reason_code}\")\n    topics = [\n        f\"mobile/{DEVICE_ID}/webrtc/offer\",\n        f\"mobile/{DEVICE_ID}/webrtc/answer\",",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    },
+    {
+        "label": "TURN_PASSWORD",
+        "kind": 5,
+        "importPath": "webrtc_device_simulator_v2",
+        "description": "webrtc_device_simulator_v2",
+        "peekOfCode": "TURN_PASSWORD = None\ndef on_connect(client, userdata, flags, reason_code, properties):\n    if getattr(reason_code, \"is_failure\", False):\n        logger.error(f\"Failed to connect to MQTT: {reason_code}\")\n        return\n    logger.info(f\"MQTT Connected with reason code {reason_code}\")\n    topics = [\n        f\"mobile/{DEVICE_ID}/webrtc/offer\",\n        f\"mobile/{DEVICE_ID}/webrtc/answer\",\n        f\"mobile/{DEVICE_ID}/webrtc/candidate\",",
+        "detail": "webrtc_device_simulator_v2",
+        "documentation": {}
+    }
+]
