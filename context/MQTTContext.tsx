@@ -71,19 +71,10 @@ interface MQTTContextType {
     deviceInfo: DeviceInfo | null;
     alertHistory: AlertMessage[];
     
-    // WebRTC States
-    localStream: MediaStream | null;
-    remoteStream: MediaStream | null;
-    callState: CallState;
-    
     connect: (deviceId: string) => Promise<void>;
     disconnect: () => void;
     publish: (topic: string, message: string, qos?: 0 | 1 | 2) => void;
-    
-    // WebRTC Actions
-    startCall: () => Promise<void>;
-    answerCall: () => Promise<void>;
-    hangup: () => void;
+    subscribe: (topic: string, callback: (topic: string, payload: string) => void) => void;
 }
 
 const MQTTContext = createContext<MQTTContextType | null>(null);
@@ -93,17 +84,10 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [isConnected, setIsConnected] = useState(false);
     const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
     const [alertHistory, setAlertHistory] = useState<AlertMessage[]>([]);
-
-    // --- WebRTC States ---
-    const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-    const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-    const [callState, setCallState] = useState<CallState>('idle');
     
-    const peerConnection = useRef<RTCPeerConnection | null>(null);
-    const pcTrackHandlerRef = useRef<((event: any) => void) | null>(null);
-    const pcIceHandlerRef = useRef<((event: any) => void) | null>(null);
     const savedDeviceId = useRef<string | null>(null);
     const isConnecting = useRef(false);
+    const messageHandlers = useRef<Map<string, (topic: string, payload: string) => void>>(new Map());
     const handleMessageRef = useRef<(topic: string, payload: string) => void>(() => {});
     const hangupRef = useRef<() => void>(() => {});
     
@@ -117,77 +101,129 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.log('[MQTT] ▶️ connect() called with deviceId=', deviceId);
         savedDeviceId.current = deviceId;
 
-        const attempt = (port: number, useSSL: boolean): Promise<Paho.Client> => {
-            return new Promise((resolve, reject) => {
-                // 🔥 Connect to custom MQTT broker: mqtt.phuocnguyn.id.vn
-                const newClient = new Paho.Client('mqtt.phuocnguyn.id.vn', port, '/', `mobile001`);
+        // Cấu hình MQTT Broker
+        const BROKER_HOST = 'mqtt.phuocnguyn.id.vn';
+        const BROKER_PORT = 443;
+        const BROKER_WS_PATH = '/';
+        const BROKER_USE_TLS = true;
+        const MQTT_USER = 'mobile001';
+        const MQTT_PASSWORD = '123456';
 
-                newClient.onMessageArrived = (message: Paho.Message) => {
-                    handleMessageRef.current(message.destinationName, message.payloadString);
-                };
-                newClient.onConnectionLost = (response) => {
-                    if (response.errorCode !== 0) {
-                        console.warn('[MQTT] Connection lost:', response.errorMessage);
-                        setIsConnected(false);
-                        hangupRef.current();
-                        const id = savedDeviceId.current;
-                        if (id && !isConnecting.current) {
-                            isConnecting.current = true;
-                            setTimeout(() => {
-                                connect(id).finally(() => { isConnecting.current = false; });
-                            }, 2000);
-                        }
+        return new Promise((resolve, reject) => {
+            // Tạo client ID unique để tránh conflict
+            // Một số broker yêu cầu client ID unique mỗi lần kết nối
+            const clientId = `${MQTT_USER}`;
+            
+            console.log('[MQTT] Connecting with:', {
+                host: BROKER_HOST,
+                port: BROKER_PORT,
+                path: BROKER_WS_PATH,
+                clientId: clientId,
+                userName: MQTT_USER,
+                useSSL: BROKER_USE_TLS,
+            });
+
+            const newClient = new Paho.Client(BROKER_HOST, BROKER_PORT, BROKER_WS_PATH, clientId);
+
+            newClient.onMessageArrived = (message: Paho.Message) => {
+                const topic = message.destinationName;
+                const payload = message.payloadString;
+                
+                // Gọi handler cho topic cụ thể
+                const handler = messageHandlers.current.get(topic);
+                if (handler) {
+                    handler(topic, payload);
+                }
+                
+                // Xử lý các message mặc định
+                handleDefaultMessage(topic, payload);
+            };
+            
+            newClient.onConnectionLost = (response) => {
+                if (response.errorCode !== 0) {
+                    console.warn('[MQTT] Connection lost:', response.errorMessage);
+                    setIsConnected(false);
+                    const id = savedDeviceId.current;
+                    if (id && !isConnecting.current) {
+                        isConnecting.current = true;
+                        setTimeout(() => {
+                            connect(id).finally(() => { isConnecting.current = false; });
+                        }, 2000);
                     }
-                };
+                }
+            };
 
-                newClient.connect({
-                    onSuccess: () => {
-                        console.log('[MQTT] Connected successfully to mqtt.phuocnguyn.id.vn');
-                        resolve(newClient);
-                    },
-                    onFailure: (err) => {
-                        console.warn('[MQTT] Connection failed:', err.errorMessage);
-                        reject(err);
-                    },
-                    useSSL,
-                    // Request a persistent session so broker keeps subscriptions/messages across reconnects
-                    cleanSession: false,
-                    userName: 'mobile001',      // 🔥 MQTT authentication
-                    password: '123456',          // 🔥 MQTT authentication
-                    timeout: 10,
-                });
-            });
-        };
+            const connectOptions: Paho.ConnectionOptions = {
+                onSuccess: () => {
+                    console.log('[MQTT] ✅ Connected successfully to', BROKER_HOST);
+                    setClient(newClient);
+                    setIsConnected(true);
+                    
+                    // Subscribe to default topics
+                    const topics = [
+                        `device/${deviceId}/info`,
+                        `device/${deviceId}/alert`,
+                    ];
+                    topics.forEach(topic => {
+                        newClient.subscribe(topic);
+                        console.log(`[MQTT] Subscribed to ${topic}`);
+                    });
+                    
+                    resolve();
+                },
+                onFailure: (err) => {
+                    console.error('[MQTT] ❌ Connection failed:', {
+                        errorMessage: err.errorMessage,
+                        errorCode: err.errorCode,
+                        returnCode: (err as any).returnCode,
+                    });
+                    setIsConnected(false);
+                    reject(err);
+                },
+                useSSL: BROKER_USE_TLS,
+                userName: MQTT_USER,
+                password: MQTT_PASSWORD,
+                timeout: 10,
+                cleanSession: true,
+                reconnect: false,
+            };
 
-        const finish = (connectedClient: Paho.Client) => {
-            setClient(connectedClient);
-            setIsConnected(true);
-            // App should SUBSCRIBE to what Device PUBLISHes: `mobile/{deviceId}/*`
-            const topics = [
-                `mobile/${deviceId}/info`,
-                `mobile/${deviceId}/alert`,
-                `mobile/${deviceId}/webrtc/offer`,
-                `mobile/${deviceId}/webrtc/answer`,
-                `mobile/${deviceId}/webrtc/candidate`,
-                `device/${deviceId}/gps`,
-            ];
-            topics.forEach(topic => {
-                // 🔥 Match device QoS: offer/answer = QoS 1, candidate = QoS 0
-                const qos = topic.includes('/webrtc/offer') || topic.includes('/webrtc/answer') || topic.includes('/gps') ? 1 : 0;
-                connectedClient.subscribe(topic, { qos });
-                console.log(`[MQTT] Subscribed to ${topic} (QoS=${qos})`);
+            console.log('[MQTT] Attempting connection with options:', {
+                userName: connectOptions.userName,
+                password: connectOptions.password ? '***' : 'missing',
+                hasPassword: !!connectOptions.password,
+                useSSL: connectOptions.useSSL,
+                cleanSession: connectOptions.cleanSession,
+                clientId: clientId,
             });
-        };
 
-        // Try secure websocket (port 443 with TLS)
-        return attempt(443, true)
-            .then((c) => { finish(c); })
-            .catch((err1) => {
-                console.warn('[MQTT] Secure websocket (443) failed, trying fallback 8000:', err1?.errorMessage || err1);
-                // Fallback to non-secure port 8000 if TLS fails
-                return attempt(8000, false).then((c) => { finish(c); });
-            });
+            // Debug: Kiểm tra password có được truyền đúng không
+            if (!connectOptions.password) {
+                console.error('[MQTT] ⚠️ WARNING: Password is missing!');
+            }
+
+            newClient.connect(connectOptions);
+        });
     }, []);
+
+    // Xử lý các message mặc định (device info, alert)
+    const handleDefaultMessage = (topic: string, payload: string) => {
+        try {
+            const data = JSON.parse(payload);
+            
+            if (topic.endsWith('/info')) {
+                console.log('[MQTT] 📍 Device info updated');
+                setDeviceInfo(data);
+            }
+            
+            if (topic.endsWith('/alert')) {
+                console.log('[MQTT] 🚨 Alert received:', data.message);
+                setAlertHistory(prev => [{ ...data, timestamp: Date.now() }, ...prev].slice(0, 10));
+            }
+        } catch (e) {
+            console.error(`[MQTT] ❌ Error parsing message on ${topic}:`, e);
+        }
+    };
 
     // Auto-connect on mount if a deviceId was saved previously
     React.useEffect(() => {
@@ -558,12 +594,13 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const disconnect = useCallback(() => {
         console.log('[MQTT] Disconnecting...');
-        hangup();
+        messageHandlers.current.clear();
         if (client && client.isConnected()) {
             client.disconnect();
         }
         setClient(null);
         setIsConnected(false);
+    }, [client]);
     }, [client, hangup]);
 
     const startCall = async () => {
@@ -670,20 +707,25 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     };
 
+    const subscribe = useCallback((topic: string, callback: (topic: string, payload: string) => void) => {
+        if (client && client.isConnected()) {
+            messageHandlers.current.set(topic, callback);
+            client.subscribe(topic);
+            console.log(`[MQTT] Subscribed to ${topic} with custom handler`);
+        } else {
+            console.warn(`[MQTT] ⚠️ Not connected. Cannot subscribe to ${topic}`);
+        }
+    }, [client]);
+
     return (
         <MQTTContext.Provider value={{ 
             isConnected, 
             deviceInfo, 
             alertHistory, 
-            localStream, 
-            remoteStream, 
-            callState, 
             connect, 
             disconnect, 
-            publish, 
-            startCall, 
-            answerCall, 
-            hangup 
+            publish,
+            subscribe
         }}>
             {children}
         </MQTTContext.Provider>

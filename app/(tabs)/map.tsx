@@ -6,10 +6,12 @@ import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMQTT } from "../../context/MQTTContext";
+import { useWebRTC } from "../../context/WebRTCContext";
 
 export default function MapScreen() {
     const router = useRouter();
-    const { deviceInfo, isConnected, startCall } = useMQTT();
+    const { deviceInfo, isConnected } = useMQTT();
+    const { startCall } = useWebRTC();
     const [deviceId, setDeviceId] = React.useState<string | null>(null);
 
     React.useEffect(() => {

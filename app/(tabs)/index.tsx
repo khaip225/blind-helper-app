@@ -4,13 +4,15 @@ import React, { useEffect } from 'react';
 import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMQTT } from '../../context/MQTTContext';
+import { useWebRTC } from '../../context/WebRTCContext';
 
 // TODO: Thay thế bằng Public Token của bạn
 Mapbox.setAccessToken('pk.eyJ1Ijoia2hhaTAxMDUiLCJhIjoiY21nMzRodzJ2MTdzYzJqbzlsaWI0MnNmNCJ9.91WY_NHdqYgn5mfII1eeTQ');
 
 export default function HomeScreen() {
     const router = useRouter();
-    const { isConnected, deviceInfo, alertHistory, callState, answerCall, startCall, hangup } = useMQTT();
+    const { isConnected, deviceInfo, alertHistory } = useMQTT();
+    const { callState, answerCall, startCall, hangup } = useWebRTC();
 
     const mapRef = React.useRef<Mapbox.MapView>(null);
     const cameraRef = React.useRef<Mapbox.Camera>(null);
