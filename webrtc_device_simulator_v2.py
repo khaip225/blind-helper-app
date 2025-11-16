@@ -54,6 +54,14 @@ _pyaudio_out_stream = None  # PyAudio output stream
 DEVICE_ID = "jetson"
 MAIN_LOOP: asyncio.AbstractEventLoop | None = None
 pending_ice_candidates = deque()
+last_ice_restart_ts = 0.0  # throttle repeated ICE restarts
+ICE_RESTART_COOLDOWN = 15.0  # seconds
+last_remote_answer_sdp = None  # Track last processed remote answer to ignore duplicates
+video_first_frame_ts = None  # timestamp when first outgoing video frame observed
+video_frame_count = 0
+video_monitor_task = None
+VIDEO_FRAME_LOG_INTERVAL = 120  # log every N frames
+VIDEO_FIRST_FRAME_TIMEOUT = 3.0  # seconds after connection to expect first frame
 
 # Runtime flags (configurable via CLI or environment)
 FORCE_TURN = False
@@ -61,6 +69,8 @@ FORCE_IPV4 = False
 TURN_URLS = []  # list of URLs (e.g., ["turns:your.turn.server:443?transport=tcp"])
 TURN_USERNAME = None
 TURN_PASSWORD = None
+PLAYBACK_GAIN = 1.0  # default playback gain
+PLAYBACK_OUTPUT_RATE = 48000  # output sample rate for local playback
 
 def on_connect(client, userdata, flags, reason_code, properties):
     if getattr(reason_code, "is_failure", False):
@@ -166,12 +176,28 @@ async def handle_message_async(topic, payload):
 
         elif topic.endswith("/webrtc/answer"):
             if pc:
+                global last_remote_answer_sdp
                 logger.info("📞 Received answer from mobile.")
-                await pc.setRemoteDescription(
-                    RTCSessionDescription(sdp=data["sdp"], type=data["type"])
-                )
-                logger.info("✅ Remote description set successfully.")
-                await process_pending_candidates()
+                # Accept answer only if we are in have-local-offer state
+                try:
+                    if pc.signalingState != "have-local-offer":
+                        if pc.signalingState == "stable":
+                            logger.info("⚠️ Already stable; ignoring duplicate/late answer")
+                        else:
+                            logger.warning(f"⚠️ Ignoring answer in signalingState={pc.signalingState}")
+                        return
+                    sdp = data.get("sdp")
+                    if last_remote_answer_sdp == sdp:
+                        logger.info("🔁 Duplicate answer SDP received; ignoring")
+                        return
+                    await pc.setRemoteDescription(
+                        RTCSessionDescription(sdp=sdp, type=data.get("type", "answer"))
+                    )
+                    last_remote_answer_sdp = sdp
+                    logger.info("✅ Remote description (answer) set successfully.")
+                    await process_pending_candidates()
+                except Exception as e:
+                    logger.error(f"❌ Failed to apply answer: {e}")
 
         elif topic.endswith("/webrtc/candidate"):
             if not pc:
@@ -421,15 +447,34 @@ async def initialize_peer_connection():
     try:
         from aiortc import RTCConfiguration, RTCIceServer
         
-        # Base STUN
+        # Base STUN + OpenRelay TURN (free, no auth) + Metered TURN (backup)
         ice_servers = [
+            # Google STUN
             RTCIceServer(urls=[
                 "stun:stun.l.google.com:19302",
                 "stun:stun1.l.google.com:19302",
             ]),
+            # OpenRelay Free Public TURN (no authentication required)
+            RTCIceServer(urls=[
+                "turn:openrelay.metered.ca:80",
+                "turn:openrelay.metered.ca:80?transport=tcp",
+                "turn:openrelay.metered.ca:443",
+                "turns:openrelay.metered.ca:443?transport=tcp",
+            ]),
+            # Metered TURN (your credentials - backup)
+            RTCIceServer(
+                urls=[
+                    "turn:standard.relay.metered.ca:80",
+                    "turn:standard.relay.metered.ca:80?transport=tcp",
+                    "turn:standard.relay.metered.ca:443",
+                    "turns:standard.relay.metered.ca:443?transport=tcp",
+                ],
+                username="93e17668232018bed69fae39",
+                credential="/NDIlk/I1eVxIjo2",
+            ),
         ]
 
-        # Optional TURN from config
+        # Optional TURN from CLI config (override if provided)
         if TURN_URLS and TURN_USERNAME and TURN_PASSWORD:
             ice_servers.append(
                 RTCIceServer(
@@ -438,15 +483,13 @@ async def initialize_peer_connection():
                     credential=TURN_PASSWORD,
                 )
             )
-            logger.info(f"🔐 TURN configured with {len(TURN_URLS)} URL(s)")
-        else:
-            logger.warning("No TURN configured. Cross-network calls may fail. Use --turn-urls/--turn-username/--turn-password.")
+            logger.info(f"🔐 Custom TURN configured with {len(TURN_URLS)} URL(s)")
         
         pc = RTCPeerConnection(
             configuration=RTCConfiguration(iceServers=ice_servers)
         )
         logger.info("✅ RTCPeerConnection created with ICE servers")
-        logger.info(f"   - {len(ice_servers)} ICE servers configured")
+        logger.info(f"   - {len(ice_servers)} ICE servers configured (STUN + OpenRelay + Metered)")
         logger.info("   Note: aiortc does not support iceTransportPolicy, will try all candidates")
         
     except Exception as e:
@@ -455,8 +498,37 @@ async def initialize_peer_connection():
 
     # Add video and audio tracks
     if player and player.video:
-        pc.addTrack(player.video)
-        logger.info("✅ Video track added")
+        # Wrap the video track to count frames
+        original_video_track = player.video
+
+        class MonitoredVideoTrack(MediaStreamTrack):
+            kind = "video"
+
+            def __init__(self, source_track: MediaStreamTrack):
+                super().__init__()
+                self._source = source_track
+
+            async def recv(self):  # type: ignore[override]
+                global video_frame_count, video_first_frame_ts
+                frame = await self._source.recv()
+                video_frame_count += 1
+                if video_first_frame_ts is None:
+                    video_first_frame_ts = time.time()
+                    logger.info("🎬 First video frame captured (outgoing)")
+                if video_frame_count % VIDEO_FRAME_LOG_INTERVAL == 0:
+                    logger.info(f"📡 Sent {video_frame_count} video frames")
+                return frame
+
+            def stop(self):  # type: ignore[override]
+                try:
+                    self._source.stop()
+                except Exception:
+                    pass
+                super().stop()
+
+        monitored = MonitoredVideoTrack(original_video_track)
+        pc.addTrack(monitored)
+        logger.info("✅ Video track added (monitored)")
     else:
         logger.error("❌ COULD NOT OPEN WEBCAM.")
         return
@@ -490,8 +562,32 @@ async def initialize_peer_connection():
             logger.error("   2. Try using mobile data instead of WiFi (or vice versa)")
             logger.error("   3. Check firewall settings on both devices")
             logger.error("   4. Ensure both devices can reach TURN servers")
+            # Try an ICE restart to recover if the remote still listens
+            try:
+                await schedule_ice_restart("connectionstate=failed")
+            except Exception as e:
+                logger.warning(f"ICE restart attempt failed to schedule: {e}")
         elif state == "connected":
             logger.info("🎉 WebRTC connection ESTABLISHED!")
+            # Start monitor task to detect missing video frames
+            start = time.time()
+            async def monitor_video():
+                global video_first_frame_ts, video_frame_count
+                await asyncio.sleep(VIDEO_FIRST_FRAME_TIMEOUT)
+                if video_first_frame_ts is None or video_frame_count == 0:
+                    logger.warning(
+                        f"⚠️ No video frame within {VIDEO_FIRST_FRAME_TIMEOUT}s after connection. Switching to synthetic test video track."
+                    )
+                    await replace_with_synthetic_video(pc)
+            global video_monitor_task
+            if video_monitor_task is None or video_monitor_task.done():
+                video_monitor_task = asyncio.create_task(monitor_video())
+        elif state == "disconnected":
+            # Network glitch or consent freshness timeout; attempt restart
+            try:
+                await schedule_ice_restart("connectionstate=disconnected")
+            except Exception as e:
+                logger.warning(f"ICE restart attempt failed to schedule: {e}")
 
     @pc.on("track")
     async def on_track(track):
@@ -523,39 +619,95 @@ async def initialize_peer_connection():
                             _pyaudio_out = pyaudio.PyAudio()
 
                         current_cfg = (None, None)  # (rate, channels)
+                        resampler = None
+                        resample_cfg = (None, None)  # (rate, channels)
                         while True:
                             frame: av.AudioFrame = await t.recv()
-                            rate = getattr(frame, "sample_rate", 48000) or 48000
-                            # Convert to numpy array; dtype/layout depends on frame format
-                            samples = frame.to_ndarray()
-
-                            # Ensure int16 PCM for PyAudio
-                            if samples.dtype == np.float32 or samples.dtype == np.float64:
-                                # Clamp then scale float to int16
-                                samples = np.clip(samples, -1.0, 1.0)
-                                samples = (samples * 32767.0).astype(np.int16)
-                            elif samples.dtype == np.int32:
-                                # Downscale to int16
-                                samples = (samples >> 16).astype(np.int16)
-                            elif samples.dtype != np.int16:
-                                # Fallback conversion
-                                samples = samples.astype(np.int16, copy=False)
-
-                            if samples.ndim == 1:
-                                channels = 1
-                                interleaved = samples.tobytes()
-                            else:
-                                channels = samples.shape[0]
-                                if channels > 2:
-                                    # Downmix to mono
-                                    samples = np.mean(samples, axis=0).astype(np.int16)
-                                    channels = 1
-                                    interleaved = samples.tobytes()
-                                elif channels == 1:
-                                    interleaved = samples[0].tobytes()
+                            # Determine desired output channels (1 or 2)
+                            in_channels = 1
+                            try:
+                                if getattr(frame, "layout", None) is not None:
+                                    in_channels = getattr(frame.layout, "channels", 1) or 1
                                 else:
-                                    # Interleave (C, N) -> (N*C,)
-                                    interleaved = samples.T.reshape(-1).tobytes()
+                                    probe = frame.to_ndarray()
+                                    in_channels = 1 if probe.ndim == 1 else min(probe.shape[0], 2)
+                            except Exception:
+                                in_channels = 1
+                            out_channels = 1 if in_channels == 1 else 2
+
+                            # (Re)create resampler if config changed
+                            if resampler is None or resample_cfg != (PLAYBACK_OUTPUT_RATE, out_channels):
+                                layout = "mono" if out_channels == 1 else "stereo"
+                                try:
+                                    resampler = av.audio.resampler.AudioResampler(
+                                        format="s16", layout=layout, rate=PLAYBACK_OUTPUT_RATE
+                                    )
+                                    resample_cfg = (PLAYBACK_OUTPUT_RATE, out_channels)
+                                    logger.info(
+                                        f"🎛️ Resampler configured -> rate={PLAYBACK_OUTPUT_RATE}, channels={out_channels}"
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"Failed to create resampler, using raw frames: {e}")
+                                    resampler = None
+
+                            try:
+                                if resampler is not None:
+                                    out_frames = resampler.resample(frame)
+                                    # concatenate all returned frames
+                                    chunks = []
+                                    for rf in out_frames:
+                                        arr = rf.to_ndarray()
+                                        if arr.dtype != np.int16:
+                                            arr = arr.astype(np.int16, copy=False)
+                                        if arr.ndim == 1:
+                                            ch = 1
+                                            pcm_arr = arr
+                                        else:
+                                            ch = arr.shape[0]
+                                            if ch == 1:
+                                                pcm_arr = arr[0]
+                                            else:
+                                                pcm_arr = arr.T.reshape(-1)
+                                        chunks.append(pcm_arr)
+                                    pcm = np.concatenate(chunks) if chunks else np.empty(0, dtype=np.int16)
+                                    rate = PLAYBACK_OUTPUT_RATE
+                                    channels = out_channels
+                                else:
+                                    # Fallback to original frame properties
+                                    rate = getattr(frame, "sample_rate", PLAYBACK_OUTPUT_RATE) or PLAYBACK_OUTPUT_RATE
+                                    arr = frame.to_ndarray()
+                                    if arr.dtype == np.float32 or arr.dtype == np.float64:
+                                        arr = np.clip(arr, -1.0, 1.0)
+                                        arr = (arr * 32767.0).astype(np.int16)
+                                    elif arr.dtype == np.int32:
+                                        arr = (arr >> 16).astype(np.int16)
+                                    elif arr.dtype != np.int16:
+                                        arr = arr.astype(np.int16, copy=False)
+                                    if arr.ndim == 1:
+                                        channels = 1
+                                        pcm = arr
+                                    else:
+                                        channels = arr.shape[0]
+                                        if channels > 2:
+                                            arr = np.mean(arr, axis=0).astype(np.int16)
+                                            channels = 1
+                                            pcm = arr
+                                        elif channels == 1:
+                                            pcm = arr[0]
+                                        else:
+                                            pcm = arr.T.reshape(-1)
+                            except Exception as e:
+                                logger.warning(f"Resample/convert error: {e}")
+                                await asyncio.sleep(0.01)
+                                continue
+
+                            # Apply gain with clipping
+                            if PLAYBACK_GAIN != 1.0:
+                                amplified = (pcm.astype(np.int32) * PLAYBACK_GAIN)
+                                amplified = np.clip(amplified, -32768, 32767).astype(np.int16)
+                                pcm_bytes = amplified.tobytes()
+                            else:
+                                pcm_bytes = pcm.tobytes()
 
                             if current_cfg != (rate, channels) or _pyaudio_out_stream is None:
                                 # (Re)open output stream with new format
@@ -576,14 +728,17 @@ async def initialize_peer_connection():
                                 current_cfg = (rate, channels)
 
                             try:
-                                _pyaudio_out_stream.write(interleaved)
+                                _pyaudio_out_stream.write(pcm_bytes)
                             except Exception as werr:
                                 logger.warning(f"Audio playback write issue: {werr}")
                                 await asyncio.sleep(0.01)
                     except asyncio.CancelledError:
                         pass
                     except Exception as e:
-                        logger.warning(f"Audio playback stopped due to error: {e}")
+                        if str(e).strip() == "":
+                            logger.info("🔇 Audio playback ended (track finished)")
+                        else:
+                            logger.warning(f"Audio playback stopped due to error: {e}")
 
                 global playback_task
                 if playback_task is None or playback_task.done():
@@ -599,6 +754,13 @@ async def initialize_peer_connection():
         state = pc.iceConnectionState
         emoji = {"new": "🆕", "checking": "🔍", "connected": "✅", "completed": "🏁", "failed": "❌", "disconnected": "⚠️", "closed": "🔒"}
         logger.info(f"{emoji.get(state, '❓')} ICE connection state: {state}")
+        # If consent freshness expires, state often flips to 'disconnected' then 'failed'.
+        # Proactively attempt an ICE restart (throttled).
+        if state in ("disconnected", "failed"):
+            try:
+                await schedule_ice_restart(f"iceconnectionstate={state}")
+            except Exception as e:
+                logger.warning(f"ICE restart attempt failed to schedule: {e}")
 
     @pc.on("icegatheringstatechange")
     async def on_icegatheringstatechange():
@@ -661,6 +823,8 @@ async def start_sos_call():
 
     logger.info("🆘 Starting SOS call...")
     pending_ice_candidates.clear()
+    global last_remote_answer_sdp
+    last_remote_answer_sdp = None
     await initialize_peer_connection()
     
     if pc:
@@ -671,20 +835,103 @@ async def start_sos_call():
         client.publish(f"device/{DEVICE_ID}/webrtc/offer", payload)
         logger.info("📤 Offer published to MQTT")
 
+async def replace_with_synthetic_video(pc: RTCPeerConnection):
+    """Thay thế track video bằng track tổng hợp (màu sắc thay đổi) để tránh timeout consent khi camera không đẩy frame."""
+    from av import VideoFrame
+    class SyntheticVideo(MediaStreamTrack):
+        kind = "video"
+        def __init__(self):
+            super().__init__()
+            self._pts = 0
+            self._time_base = fractions.Fraction(1, 30)
+            self._hue = 0
+        async def recv(self):  # type: ignore[override]
+            await asyncio.sleep(1/30)
+            frame = VideoFrame(width=640, height=480, format='rgb24')
+            # Generate solid color changing over time
+            import numpy as _np
+            self._hue = (self._hue + 3) % 360
+            # Simple hue to RGB approximation
+            r = abs((self._hue % 360) - 180) / 180
+            g = abs(((self._hue + 120) % 360) - 180) / 180
+            b = abs(((self._hue + 240) % 360) - 180) / 180
+            arr = _np.zeros((480, 640, 3), dtype=_np.uint8)
+            arr[..., 0] = int(r * 255)
+            arr[..., 1] = int(g * 255)
+            arr[..., 2] = int(b * 255)
+            frame.pts = self._pts
+            frame.time_base = self._time_base
+            frame.update(arr)
+            self._pts += 1
+            if self._pts == 1:
+                logger.info("🧪 Synthetic video track started")
+            if self._pts % 120 == 0:
+                logger.info(f"🧪 Synthetic frames sent: {self._pts}")
+            return frame
+    # Remove existing video senders and add new synthetic
+    try:
+        for sender in list(pc.getSenders()):
+            if sender.track and sender.track.kind == 'video':
+                await sender.replaceTrack(None)
+        synthetic = SyntheticVideo()
+        pc.addTrack(synthetic)
+        logger.info("🔁 Replaced camera video with synthetic test track")
+    except Exception as e:
+        logger.warning(f"Could not replace video track: {e}")
+
 async def answer_call():
     """Trả lời cuộc gọi từ mobile"""
     global pc
     
     if pc:
+        # Only create answer if we actually have a remote offer
+        if not pc.remoteDescription or pc.remoteDescription.type != "offer":
+            logger.warning(f"⚠️ answer_call invoked but remoteDescription missing/invalid (state={pc.signalingState})")
+            return
+        if pc.signalingState != "have-remote-offer":
+            if pc.signalingState == "stable":
+                logger.info("ℹ️ Already stable; skipping answer creation")
+                return
+            logger.warning(f"⚠️ Cannot create answer in signalingState={pc.signalingState}")
+            return
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
-        
+
         payload = json.dumps({"sdp": answer.sdp, "type": answer.type})
         client.publish(f"device/{DEVICE_ID}/webrtc/answer", payload)
         logger.info("📤 Answer published to MQTT")
 
+async def schedule_ice_restart(reason: str = ""):
+    """Attempt an ICE restart by sending a new offer.
+
+    This can recover from consent freshness expiry or transient network changes.
+    Throttled by ICE_RESTART_COOLDOWN to avoid renegotiation storms.
+    """
+    global pc, last_ice_restart_ts
+    now = time.monotonic()
+    if now - last_ice_restart_ts < ICE_RESTART_COOLDOWN:
+        logger.info(
+            f"⏳ Skipping ICE restart (cooldown {ICE_RESTART_COOLDOWN}s). Reason: {reason}"
+        )
+        return
+    if not pc or pc.connectionState == "closed":
+        logger.info("⚪ ICE restart skipped: no active PeerConnection")
+        return
+    try:
+        logger.info(f"🔁 Attempting ICE restart (reason='{reason}')…")
+        offer = await pc.createOffer(iceRestart=True)
+        await pc.setLocalDescription(offer)
+
+        payload = json.dumps({"sdp": offer.sdp, "type": offer.type})
+        topic = f"device/{DEVICE_ID}/webrtc/offer"
+        client.publish(topic, payload)
+        last_ice_restart_ts = now
+        logger.info(f"📤 ICE-restart offer published to {topic}")
+    except Exception as e:
+        logger.warning(f"ICE restart failed: {e}")
+
 async def main():
-    global client, MAIN_LOOP, DEVICE_ID, FORCE_TURN, FORCE_IPV4, TURN_URLS, TURN_USERNAME, TURN_PASSWORD
+    global client, MAIN_LOOP, DEVICE_ID, FORCE_TURN, FORCE_IPV4, TURN_URLS, TURN_USERNAME, TURN_PASSWORD, PLAYBACK_GAIN
 
     # Parse CLI args / env
     import argparse
@@ -695,6 +942,8 @@ async def main():
     parser.add_argument("--turn-urls", default=os.environ.get("TURN_URLS", ""), help="Comma-separated TURN URLs (e.g., turns:turn.example.com:443?transport=tcp)")
     parser.add_argument("--turn-username", default=os.environ.get("TURN_USERNAME"))
     parser.add_argument("--turn-password", default=os.environ.get("TURN_PASSWORD"))
+    parser.add_argument("--playback-gain", type=float, default=float(os.environ.get("PLAYBACK_GAIN", "1.0")), help="Gain multiplier for incoming audio playback (default 1.0)")
+    parser.add_argument("--playback-rate", type=int, default=int(os.environ.get("PLAYBACK_RATE", "48000")), help="Output sample rate for local audio playback (e.g. 44100 or 48000)")
     args = parser.parse_args()
 
     DEVICE_ID = args.device_id
@@ -703,6 +952,9 @@ async def main():
     TURN_URLS = [u.strip() for u in args.turn_urls.split(",") if u.strip()] if args.turn_urls else []
     TURN_USERNAME = args.turn_username
     TURN_PASSWORD = args.turn_password
+    PLAYBACK_GAIN = max(0.1, min(args.playback_gain, 10.0))  # clamp gain 0.1 - 10.0
+    global PLAYBACK_OUTPUT_RATE
+    PLAYBACK_OUTPUT_RATE = int(args.playback_rate)
 
     # Startup banner
     print("\n" + "="*60)
@@ -718,6 +970,8 @@ async def main():
         print(f"   - TURN_URLS: {TURN_URLS}")
         print(f"   - TURN_USERNAME set: {bool(TURN_USERNAME)}")
         print(f"   - TURN_PASSWORD set: {bool(TURN_PASSWORD)}")
+    print(f"🔊 Playback gain: {PLAYBACK_GAIN}")
+    print(f"🎚️ Playback rate: {PLAYBACK_OUTPUT_RATE} Hz")
     print("📹 Press Enter to START SOS call (Device -> Mobile)")
     print("📞 Also listening for incoming calls from Mobile...")
     print("="*60 + "\n")

@@ -1,7 +1,7 @@
 import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
 import React, { useEffect } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { RTCView } from 'react-native-webrtc';
+import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { RTCView, mediaDevices } from 'react-native-webrtc';
 import { useMQTT } from '../../context/MQTTContext';
 
 export default function CallScreen() {
@@ -21,10 +21,37 @@ export default function CallScreen() {
     useEffect(() => {
         if (remoteStream) {
             console.log("✅ [CallScreen] Đã nhận được remoteStream!", remoteStream.toURL());
+            // Bật loa ngoài trên Android để nghe rõ âm thanh từ thiết bị
+            if (Platform.OS === 'android') {
+                try {
+                    (mediaDevices as any).setSpeakerphoneOn?.(true);
+                    console.log('🔊 [CallScreen] Speakerphone ON');
+                } catch (e) {
+                    console.log('ℹ️ [CallScreen] setSpeakerphoneOn not available:', e);
+                }
+            }
+            // Đảm bảo các track audio/video được enable
+            try {
+                const audioTracks = remoteStream.getAudioTracks?.() || [];
+                const videoTracks = remoteStream.getVideoTracks?.() || [];
+                audioTracks.forEach((t) => {
+                    if (t.enabled === false) t.enabled = true;
+                    console.log('🔈 [CallScreen] Audio track enabled:', t.id);
+                });
+                videoTracks.forEach((t) => {
+                    if (t.enabled === false) t.enabled = true;
+                });
+                console.log('[CallScreen] Tracks -> video:', videoTracks.length, 'audio:', audioTracks.length);
+                
+                // 🔊 Thông báo user tăng volume điện thoại nếu âm thanh nhỏ
+                console.log('💡 [CallScreen] TIP: Nếu âm thanh nhỏ, hãy tăng volume điện thoại lên MAX!');
+            } catch {}
         } else {
             console.log("🟡 [CallScreen] remoteStream hiện đang là null.");
         }
     }, [remoteStream]);
+
+    // Không tự động trả lời nữa – người dùng phải bấm nút Trả lời
 
     const handleHangup = () => {
         hangup();
@@ -37,9 +64,10 @@ export default function CallScreen() {
     
     return (
         <View style={styles.container}>
-            {/* Logic render chính: Chỉ hiển thị RTCView khi đã kết nối và có remoteStream */}
-            {callState === 'connected' && remoteStream ? (
+            {/* Hiển thị video ngay khi có remoteStream (không chờ callState) */}
+            {remoteStream ? (
                 <RTCView
+                    key={(remoteStream as any)?.id || 'remote'}
                     streamURL={remoteStream.toURL()}
                     style={styles.remoteVideo}
                     objectFit="cover"
@@ -55,7 +83,13 @@ export default function CallScreen() {
                             </TouchableOpacity>
                         </>
                     )}
-                    {(callState === 'calling' || (callState === 'connected' && !remoteStream)) && (
+                    {callState === 'calling' && (
+                        <>
+                            <Text style={styles.statusText}>Đang thiết lập kết nối...</Text>
+                            <ActivityIndicator size="large" color="#fff" style={{ marginTop: 20 }} />
+                        </>
+                    )}
+                    {(callState === 'calling' || callState === 'connected') && (
                         <>
                             <Text style={styles.statusText}>Đang kết nối video...</Text>
                             <ActivityIndicator size="large" color="#fff" style={{ marginTop: 20 }} />

@@ -97,7 +97,7 @@ export default function HomeScreen() {
                             </Text>
                         </Text>
                         <Text style={styles.gpsText}>
-                            📍 GPS: {isConnected && deviceInfo?.gps ? 'OK' : 'Không xác định'}
+                            📍 GPS: {isConnected && deviceInfo?.gps ? `${Number(deviceInfo.gps.lat).toFixed(6)}, ${Number(deviceInfo.gps.long).toFixed(6)}` : 'Không xác định'}
                         </Text>
                     </View>
                 </View>

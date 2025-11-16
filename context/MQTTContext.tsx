@@ -4,6 +4,17 @@ import Paho from 'paho-mqtt';
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
 import { mediaDevices, MediaStream, RTCIceCandidate, RTCPeerConnection, RTCSessionDescription } from 'react-native-webrtc';
 
+// Import InCallManager for speaker control
+let InCallManager: any = null;
+try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const incallModule = require('react-native-incall-manager');
+    InCallManager = incallModule?.default || incallModule;
+    console.log('[Audio] InCallManager loaded:', typeof InCallManager, InCallManager);
+} catch (err) {
+    console.warn('[Audio] react-native-incall-manager not installed:', err);
+}
+
 // Polyfill Buffer
 global.Buffer = Buffer;
 
@@ -21,38 +32,37 @@ interface AlertMessage {
 
 type CallState = 'idle' | 'calling' | 'receiving' | 'connected';
 
-// Cấu hình STUN + TURN servers với ExpressTurn credentials
+// 🔥 Chỉ dùng Metered.ca STUN/TURN - KHÔNG dùng Google STUN
+// Cấu hình giống y hệt code mẫu của Metered.ca
 const configuration = {
   iceServers: [
-    // Google STUN servers (luôn reliable)
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    
-    // ExpressTurn TURN Server (Your credentials) - UDP + TCP
     {
-      urls: [
-        'turn:relay1.expressturn.com:3478',
-        'turn:relay1.expressturn.com:3478?transport=tcp',
-        'turns:relay1.expressturn.com:5349',
-      ],
-      username: '000000002076506456',
-      credential: 'bK8A/K+WGDw/tYcuvM9/5xCnEZs=',
+      urls: 'stun:stun.relay.metered.ca:80',
     },
-    
-    // Twilio STUN/TURN (public free tier)
     {
-      urls: [
-        'turn:global.turn.twilio.com:3478?transport=udp',
-        'turn:global.turn.twilio.com:3478?transport=tcp',
-        'turn:global.turn.twilio.com:443?transport=tcp',
-      ],
-      username: 'f4b4035eaa76f4a55de5f4351567653ee4ff6fa97b50b6b334fcc1be9c27212d',
-      credential: 'w1uxM55V9yVoqyVFjt+mxDBV0F87AUCemaYVQGxsPLw=',
+      urls: 'turn:sg.relay.metered.ca:80',
+      username: '93e17668232018bed69fae39',
+      credential: '/NDIlk/I1eVxIjo2',
+    },
+    {
+      urls: 'turn:sg.relay.metered.ca:80?transport=tcp',
+      username: '93e17668232018bed69fae39',
+      credential: '/NDIlk/I1eVxIjo2',
+    },
+    {
+      urls: 'turn:sg.relay.metered.ca:443',
+      username: '93e17668232018bed69fae39',
+      credential: '/NDIlk/I1eVxIjo2',
+    },
+    {
+      urls: 'turns:sg.relay.metered.ca:443?transport=tcp',
+      username: '93e17668232018bed69fae39',
+      credential: '/NDIlk/I1eVxIjo2',
     },
   ],
-  // Cho phép thử tất cả các loại kết nối (host, srflx, relay)
-  // ICE sẽ tự động chọn đường đi tốt nhất
+  // 🔥 'all' allows HOST/SRFLX/RELAY - will try direct connection first, then relay
   iceTransportPolicy: 'all' as const,
+  iceCandidatePoolSize: 10,
 };
 
 // --- Định nghĩa kiểu dữ liệu cho Context ---
@@ -99,13 +109,18 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     // ✅ CRITICAL FIX: Buffer cho ICE candidates nhận trước remoteDescription
     const pendingIceCandidates = useRef<any[]>([]);
+    // Track last published answer SDP to avoid duplicate publishes
+    const lastPublishedAnswerSdp = useRef<string | null>(null);
+    // Auto-answer đã bị gỡ bỏ để đơn giản hóa luồng: chỉ trả lời khi người dùng bấm nút
 
     const connect = useCallback((deviceId: string): Promise<void> => {
+        console.log('[MQTT] ▶️ connect() called with deviceId=', deviceId);
         savedDeviceId.current = deviceId;
 
         const attempt = (port: number, useSSL: boolean): Promise<Paho.Client> => {
             return new Promise((resolve, reject) => {
-                const newClient = new Paho.Client('broker.hivemq.com', port, '/mqtt', `react-native-mobile-${Date.now()}`);
+                // 🔥 Connect to custom MQTT broker: mqtt.phuocnguyn.id.vn
+                const newClient = new Paho.Client('mqtt.phuocnguyn.id.vn', port, '/', `mobile001`);
 
                 newClient.onMessageArrived = (message: Paho.Message) => {
                     handleMessageRef.current(message.destinationName, message.payloadString);
@@ -127,7 +142,7 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
                 newClient.connect({
                     onSuccess: () => {
-                        console.log('[MQTT] Connected successfully');
+                        console.log('[MQTT] Connected successfully to mqtt.phuocnguyn.id.vn');
                         resolve(newClient);
                     },
                     onFailure: (err) => {
@@ -135,6 +150,10 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         reject(err);
                     },
                     useSSL,
+                    // Request a persistent session so broker keeps subscriptions/messages across reconnects
+                    cleanSession: false,
+                    userName: 'mobile001',      // 🔥 MQTT authentication
+                    password: '123456',          // 🔥 MQTT authentication
                     timeout: 10,
                 });
             });
@@ -143,24 +162,29 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const finish = (connectedClient: Paho.Client) => {
             setClient(connectedClient);
             setIsConnected(true);
+            // App should SUBSCRIBE to what Device PUBLISHes: `mobile/{deviceId}/*`
             const topics = [
-                `device/${deviceId}/info`,
-                `device/${deviceId}/alert`,
-                `device/${deviceId}/webrtc/offer`,
-                `device/${deviceId}/webrtc/answer`,
-                `device/${deviceId}/webrtc/candidate`,
+                `mobile/${deviceId}/info`,
+                `mobile/${deviceId}/alert`,
+                `mobile/${deviceId}/webrtc/offer`,
+                `mobile/${deviceId}/webrtc/answer`,
+                `mobile/${deviceId}/webrtc/candidate`,
+                `device/${deviceId}/gps`,
             ];
             topics.forEach(topic => {
-                connectedClient.subscribe(topic);
-                console.log(`[MQTT] Subscribed to ${topic}`);
+                // 🔥 Match device QoS: offer/answer = QoS 1, candidate = QoS 0
+                const qos = topic.includes('/webrtc/offer') || topic.includes('/webrtc/answer') || topic.includes('/gps') ? 1 : 0;
+                connectedClient.subscribe(topic, { qos });
+                console.log(`[MQTT] Subscribed to ${topic} (QoS=${qos})`);
             });
         };
 
-        // Try secure first, then fallback to ws if needed
-        return attempt(8884, true)
+        // Try secure websocket (port 443 with TLS)
+        return attempt(443, true)
             .then((c) => { finish(c); })
             .catch((err1) => {
-                console.warn('[MQTT] Secure connect failed, trying ws fallback:', err1?.errorMessage || err1);
+                console.warn('[MQTT] Secure websocket (443) failed, trying fallback 8000:', err1?.errorMessage || err1);
+                // Fallback to non-secure port 8000 if TLS fails
                 return attempt(8000, false).then((c) => { finish(c); });
             });
     }, []);
@@ -171,6 +195,7 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const tryAutoConnect = async () => {
             try {
                 const id = await AsyncStorage.getItem('deviceId');
+                console.log('[MQTT] 🔎 tryAutoConnect read deviceId from AsyncStorage ->', id);
                 if (cancelled) return;
                 if (id && !isConnected && !(client && client.isConnected()) && !isConnecting.current) {
                     isConnecting.current = true;
@@ -191,8 +216,11 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const initializePeerConnection = async () => {
         console.log('[WebRTC] Initializing peer connection...');
         
-        // Clear pending ICE candidates
+    // Clear pending ICE candidates and reset answer flag
         pendingIceCandidates.current = [];
+        try { answeredRef.current = false; } catch {}
+        lastPublishedAnswerSdp.current = null;
+    // Không dùng autoAnswerRequested nữa
         
         // Close any existing connection first
         if (peerConnection.current) {
@@ -211,7 +239,7 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Get local media
         console.log('[WebRTC] Requesting camera/microphone access...');
         const stream = await mediaDevices.getUserMedia({ 
-            audio: true, 
+            audio: true,
             video: {
                 width: { ideal: 640 },
                 height: { ideal: 480 },
@@ -229,19 +257,60 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Track handler
         const onTrack = (event: any) => {
-            console.log('[WebRTC] 📹 Received remote track:', event.track.kind);
-            const streams = event?.streams;
-            if (streams && streams[0]) {
-                console.log('[WebRTC] ✅ Setting remote stream');
-                setRemoteStream(streams[0]);
-                setCallState('connected');
-            } else if (event?.track) {
-                // Fallback: if streams not provided, assemble a MediaStream
-                console.log('[WebRTC] Assembling remote stream from track');
-                const remote = new MediaStream();
-                remote.addTrack(event.track);
-                setRemoteStream(remote);
-                setCallState('connected');
+            try {
+                console.log('[WebRTC] 📹 Received remote track:', event.track?.kind, 'id=', event.track?.id);
+                const streams = event?.streams;
+                let remote: MediaStream | null = null;
+                if (streams && streams[0]) {
+                    remote = streams[0];
+                    console.log('[WebRTC] ✅ Using remote stream from event.streams[0], id=', (remote as any)?.id);
+                } else if (event?.track) {
+                    // Fallback: assemble a MediaStream from single track
+                    console.log('[WebRTC] 🧩 Assembling remote stream from single track');
+                    remote = new MediaStream();
+                    remote.addTrack(event.track);
+                }
+                if (remote) {
+                    // Ensure tracks are enabled
+                    try {
+                        const vTracks = remote.getVideoTracks?.() || [];
+                        const aTracks = remote.getAudioTracks?.() || [];
+                        vTracks.forEach((t) => {
+                            if ((t as any).enabled === false) (t as any).enabled = true;
+                            console.log('[WebRTC] 🎞️ Remote video track:', t.id, 'enabled=', (t as any).enabled);
+                        });
+                        aTracks.forEach((t) => {
+                            if ((t as any).enabled === false) (t as any).enabled = true;
+                            console.log('[WebRTC] 🔈 Remote audio track:', t.id, 'enabled=', (t as any).enabled);
+                        });
+                        console.log('[WebRTC] 📦 Remote stream tracks -> video:', vTracks.length, 'audio:', aTracks.length);
+                    } catch (e) {
+                        console.log('[WebRTC] (log tracks) error:', e);
+                    }
+                    setRemoteStream(remote);
+                    // Tentatively mark connected here; ICE handler will also confirm
+                    setCallState('connected');
+                    
+                    // 🔊 Enable speakerphone when remote stream is received
+                    console.log('[Audio] 🔍 InCallManager type:', typeof InCallManager);
+                    console.log('[Audio] 🔍 InCallManager.start type:', typeof InCallManager?.start);
+                    
+                    if (InCallManager && typeof InCallManager.start === 'function') {
+                        try {
+                            console.log('[Audio] 🔊 Attempting to enable speakerphone...');
+                            InCallManager.start({ media: 'video', ringback: '' });
+                            InCallManager.setForceSpeakerphoneOn(true);
+                            InCallManager.setSpeakerphoneOn(true);
+                            console.log('[Audio] ✅ Speakerphone enabled');
+                        } catch (err) {
+                            console.error('[Audio] ❌ Failed to enable speakerphone:', err);
+                        }
+                    } else {
+                        console.warn('[Audio] ⚠️ InCallManager not properly linked - try rebuild: npx expo prebuild --clean && npx expo run:android');
+                    }
+                }
+            } catch (err) {
+                console.warn('[WebRTC] ontrack handler error:', err);
             }
         };
         
@@ -260,11 +329,23 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 const emoji = type === 'relay' ? '🔄' : type === 'srflx' ? '🌐' : type === 'host' ? '🏠' : '❓';
                 console.log(`[WebRTC] ${emoji} Generated ${type.toUpperCase()} candidate:`, candStr.substring(0, 80));
                 
-                publish(`mobile/${savedDeviceId.current}/webrtc/candidate`, JSON.stringify({
+                // ✅ CRITICAL: Log để debug TURN - phải thấy RELAY candidates!
+                if (type === 'relay') {
+                    console.log('[WebRTC] ✅ TURN is working! RELAY candidate generated.');
+                } else if (type === 'host') {
+                    console.log('[WebRTC] 🏠 Local candidate (may not work across networks)');
+                }
+                
+                // 🔥 FIX: Thêm type field để device parser nhận dạng đúng
+                const payload = {
+                    type: 'candidate',  // ← Thêm field này!
                     candidate: cand.candidate,
                     sdpMid: cand.sdpMid,
                     sdpMLineIndex: cand.sdpMLineIndex,
-                }));
+                };
+                console.log(`[WebRTC] 📤 Publishing ${type} candidate payload:`, JSON.stringify(payload).substring(0, 150));
+                // ✅ ĐÚNG: publish tới topic mà device đang subscribe
+                publish(`device/${savedDeviceId.current}/webrtc/candidate`, JSON.stringify(payload));
             } else if (!event?.candidate) {
                 console.log('[WebRTC] 🏁 ICE gathering complete');
             }
@@ -278,6 +359,8 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 console.error('[WebRTC] ❌ ICE connection failed!');
             } else if (state === 'connected' || state === 'completed') {
                 console.log('[WebRTC] ✅ ICE connection established!');
+                // Ensure UI reflects connected state once ICE is established
+                setCallState((prev) => (prev !== 'connected' ? 'connected' : prev));
             }
         };
 
@@ -327,8 +410,21 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             const data = JSON.parse(payload);
             
-            if (topic.endsWith('/info')) {
+            if (topic.endsWith('/gps')) {
+                // Detailed logging to help debug GPS messages from device
                 console.log('[MQTT] 📍 Device info updated');
+                console.log('[MQTT] 📍 Raw payload string:', payload);
+                try {
+                    console.log('[MQTT] 📍 Parsed GPS object:', data);
+                    // Detect common shapes and log helpful hints
+                    if (data && data.gps) {
+                        console.log('[MQTT] 📍 Detected nested `gps` object ->', data.gps);
+                    } else if (data && (data.lat !== undefined || data.latitude !== undefined)) {
+                        console.log('[MQTT] 📍 Detected top-level lat/long ->', { lat: data.lat ?? data.latitude, long: data.long ?? data.longitude });
+                    }
+                } catch (e) {
+                    console.warn('[MQTT] 📍 Failed to inspect GPS payload:', e);
+                }
                 setDeviceInfo(data);
             }
             
@@ -343,12 +439,14 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 await initializePeerConnection();
                 
                 if (peerConnection.current) {
+                    console.log('[WebRTC] 🔍 signalingState before setRemoteDescription:', peerConnection.current.signalingState);
                     await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data));
-                    console.log('[WebRTC] ✅ Remote description set');
+                    console.log('[WebRTC] ✅ Remote description set, signalingState=', peerConnection.current.signalingState);
                     
                     // Process any pending ICE candidates
                     await processPendingIceCandidates();
                     
+                    // Đặt trạng thái đang nhận – chờ người dùng bấm "Trả lời"
                     setCallState('receiving');
                 }
             }
@@ -356,11 +454,22 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // ✅ WebRTC Answer handling
             if (topic.endsWith('/webrtc/answer') && peerConnection.current) {
                 console.log('[WebRTC] 📞 Received answer from device');
-                await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data));
-                console.log('[WebRTC] ✅ Remote description set');
+                console.log('[WebRTC] 🔍 Current signalingState:', peerConnection.current.signalingState);
                 
-                // Process any pending ICE candidates
-                await processPendingIceCandidates();
+                // Only set if we're waiting for an answer (we sent an offer)
+                if (peerConnection.current.signalingState === 'have-local-offer') {
+                    try {
+                        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data));
+                        console.log('[WebRTC] ✅ Remote answer set, signalingState=', peerConnection.current.signalingState);
+                        
+                        // Process any pending ICE candidates
+                        await processPendingIceCandidates();
+                    } catch (error) {
+                        console.error('[WebRTC] ❌ Failed to set remote answer:', error);
+                    }
+                } else {
+                    console.warn('[WebRTC] ⚠️ Ignoring answer, wrong signalingState:', peerConnection.current.signalingState);
+                }
             }
             
             // ✅ CRITICAL FIX: ICE Candidate handling with buffering
@@ -369,6 +478,14 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     console.warn('[WebRTC] ⚠️ ICE candidate received but no peer connection');
                     return;
                 }
+
+                // 🔍 DEBUG: Log candidate type để debug RELAY
+                const candStr = data.candidate || '';
+                let type = 'unknown';
+                if (candStr.includes('typ relay')) type = 'RELAY';
+                else if (candStr.includes('typ srflx')) type = 'SRFLX';
+                else if (candStr.includes('typ host')) type = 'HOST';
+                console.log(`[WebRTC] 📥 Received ${type} candidate from device:`, candStr.substring(0, 80));
 
                 // Check if remote description is set
                 if (!peerConnection.current.remoteDescription) {
@@ -380,9 +497,9 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // Remote description is set, add candidate immediately
                 try {
                     await peerConnection.current.addIceCandidate(new RTCIceCandidate(data));
-                    console.log('[WebRTC] ✅ ICE candidate added');
+                    console.log(`[WebRTC] ✅ ${type} candidate added successfully`);
                 } catch (error) {
-                    console.error('[WebRTC] ❌ Failed to add ICE candidate:', error);
+                    console.error(`[WebRTC] ❌ Failed to add ${type} candidate:`, error);
                 }
             }
         } catch (e) {
@@ -396,8 +513,21 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const hangup = useCallback(() => {
         console.log('[WebRTC] 📴 Hanging up...');
         
+        // 🔊 Disable speakerphone
+        if (InCallManager) {
+            try {
+                InCallManager.setForceSpeakerphoneOn(false);
+                InCallManager.stop();
+                console.log('[Audio] 🔇 Speakerphone disabled');
+            } catch (err) {
+                console.warn('[Audio] Failed to disable speakerphone:', err);
+            }
+        }
+        
         // Clear pending candidates
         pendingIceCandidates.current = [];
+        answeredRef.current = false;
+        lastPublishedAnswerSdp.current = null;
         
         if (peerConnection.current) {
             // Remove handlers before closing to avoid leaks
@@ -463,21 +593,72 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const offer = await peerConnection.current.createOffer();
             await peerConnection.current.setLocalDescription(offer);
             console.log('[WebRTC] 📤 Sending offer to device');
+            console.log('[WebRTC] 🔍 signalingState after setLocalDescription:', peerConnection.current.signalingState);
+            // ✅ ĐÚNG: publish tới topic mà device đang subscribe
             publish(`mobile/${savedDeviceId.current}/webrtc/offer`, JSON.stringify(offer));
         }
     };
     
+    // Prevent duplicate/invalid answer creation
+    const answeredRef = useRef(false);
+
     const answerCall = async () => {
-        if (callState !== 'receiving' || !peerConnection.current || !savedDeviceId.current) {
-            console.warn('[WebRTC] Cannot answer call, state:', callState);
+        if (!peerConnection.current) {
+            console.warn('[WebRTC] Cannot answer: no peerConnection');
             return;
         }
-        
-        console.log('[WebRTC] 📞 Answering call...');
-        const answer = await peerConnection.current.createAnswer();
-        await peerConnection.current.setLocalDescription(answer);
-        console.log('[WebRTC] 📤 Sending answer to device');
-        publish(`mobile/${savedDeviceId.current}/webrtc/answer`, JSON.stringify(answer));
+        const pc = peerConnection.current;
+
+        // Valid only if we have a remote offer
+        if (!pc.remoteDescription) {
+            console.warn('[WebRTC] Cannot answer: chưa có remoteDescription (offer). signalingState=', pc.signalingState);
+            return;
+        }
+        if (pc.signalingState === 'have-remote-offer') {
+            // proceed
+        } else if (pc.signalingState === 'stable') {
+            // Already negotiated. Do not re-publish to avoid duplicates.
+            console.log('[WebRTC] Answer already created or signalingState stable - skipping');
+            return;
+        } else {
+            console.warn('[WebRTC] Cannot answer in signalingState=', pc.signalingState);
+            return;
+        }
+        if (answeredRef.current) {
+            console.log('[WebRTC] Answer already created - skipping');
+            return;
+        }
+        // Chỉ cho phép trả lời khi đang ở trạng thái nhận cuộc gọi
+        if (callState !== 'receiving') {
+            console.warn('[WebRTC] Cannot answer, callState=', callState);
+            return;
+        }
+        if (!savedDeviceId.current) {
+            console.warn('[WebRTC] Cannot answer: missing deviceId');
+            return;
+        }
+
+        try {
+            console.log('[WebRTC] 📞 Creating answer...');
+            console.log('[WebRTC] 🔍 signalingState before createAnswer:', pc.signalingState);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            console.log('[WebRTC] 🔍 signalingState after setLocalDescription:', pc.signalingState);
+            answeredRef.current = true;
+            // Sau khi tạo answer, chuyển sang trạng thái 'calling' để ẩn nút Trả lời và tránh spam
+            setCallState('calling');
+            // Only publish if not already published same SDP
+                if (lastPublishedAnswerSdp.current !== answer.sdp) {
+                lastPublishedAnswerSdp.current = answer.sdp;
+                console.log('[WebRTC] 📤 Sending answer to device');
+                // ✅ ĐÚNG: publish tới topic mà device đang subscribe
+                publish(`device/${savedDeviceId.current}/webrtc/answer`, JSON.stringify(answer));
+            } else {
+                console.log('[WebRTC] ⚠️ Skipping duplicate answer publish (same SDP)');
+            }
+        } catch (err) {
+            console.error('[WebRTC] ❌ Failed to create/send answer:', err);
+        }
     };
 
     const publish = (topic: string, message: string, qos: 0 | 1 | 2 = 1) => {

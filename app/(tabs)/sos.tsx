@@ -12,6 +12,7 @@ const SosScreen = () => {
   const router = useRouter();
   const { deviceInfo, isConnected } = useMQTT();
   const [deviceId, setDeviceId] = React.useState<string | null>(null);
+  // const navigatedRef = React.useRef(false);
 
   React.useEffect(() => {
     const getDeviceId = async () => {
@@ -20,6 +21,8 @@ const SosScreen = () => {
     };
     getDeviceId();
   }, []);
+
+  // Chỉ điều hướng khi người dùng bấm "Gọi ngay/Video Call" như trước
 
   // Default location (Đà Nẵng)
   const defaultCoords = [108.2022, 16.0544]; // [longitude, latitude]
