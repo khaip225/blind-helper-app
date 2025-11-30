@@ -1,0 +1,18 @@
+# WebRTC và MQTT
+aiortc>=1.3.0
+aiohttp>=3.8.0
+paho-mqtt>=1.6.0
+
+# Media processing
+av>=9.0.0
+opencv-python>=4.5.0
+numpy>=1.21.0
+
+# Audio
+pyaudio>=0.2.11
+
+# GPS (nếu cần)
+# gpsd-py3>=0.3.0
+
+# Logging và utilities
+# colorlog>=6.0.0

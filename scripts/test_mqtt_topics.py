@@ -1,0 +1,900 @@
+"""
+WebRTC Manager cho MQTT Module
+================================
+Quản lý kết nối WebRTC với mobile app
+"""
+
+import asyncio
+import json
+import fractions
+import time
+import os
+import sys
+import platform
+from typing import Optional, Callable
+from collections import deque
+import queue
+import cv2
+
+
+from aiortc import (
+    RTCPeerConnection, 
+    RTCSessionDescription, 
+    RTCIceCandidate,
+    RTCConfiguration,
+    RTCIceServer,
+    MediaStreamTrack
+)
+from aiortc.contrib.media import MediaPlayer
+from aiortc.sdp import candidate_from_sdp
+import av
+import numpy as np
+
+
+from log import setup_logger
+from container import container
+
+logger = setup_logger(__name__)
+
+
+class SuppressALSAErrors:
+    """Context manager to suppress ALSA error messages"""
+    def __enter__(self):
+        # Redirect stderr to devnull to suppress ALSA warnings
+        self.stderr = sys.stderr
+        try:
+            sys.stderr = open(os.devnull, 'w')
+        except Exception:
+            pass
+        return self
+    
+    def __exit__(self, *args):
+        # Restore stderr
+        try:
+            sys.stderr.close()
+        except Exception:
+            pass
+        sys.stderr = self.stderr
+
+
+class CameraVideoTrack(MediaStreamTrack):
+    """
+    Video track từ CameraDirect (OpenCV)
+    """
+    kind = "video"
+    
+    def __init__(self, camera, fps=30):
+        super().__init__()
+        self.camera = camera
+        self._pts = 0
+        self._fps = fps
+        self._time_base = fractions.Fraction(1, 90000)  # 90kHz clock
+        self._frame_interval = 1.0 / fps
+        self._last_frame_time = 0
+        logger.info(f"🎥 CameraVideoTrack initialized with {fps} FPS")
+    
+    async def recv(self):
+        """Nhận frame từ camera và convert sang VideoFrame"""
+        # FPS control
+        current_time = time.time()
+        elapsed = current_time - self._last_frame_time
+        if elapsed < self._frame_interval:
+            await asyncio.sleep(self._frame_interval - elapsed)
+        
+        # Lấy frame từ camera
+        frame_bgr = self.camera.get_latest_frame()
+        if frame_bgr is None:
+            # Return white frame nếu chưa có frame
+            frame_bgr = np.full((480, 640, 3), 255, dtype=np.uint8)
+            if self._pts % 90 == 0:  # Log mỗi 3 giây (30fps * 3)
+                logger.warning("⚠️ Camera frame is None, sending white frame")
+        
+        # Convert BGR (OpenCV) sang RGB (WebRTC)
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        
+        # Resize nếu cần (để đảm bảo kích thước phù hợp)
+        height, width = frame_rgb.shape[:2]
+        if width != 640 or height != 480:
+            frame_rgb = cv2.resize(frame_rgb, (640, 480))
+        
+        # Tạo VideoFrame từ numpy array
+        video_frame = av.VideoFrame.from_ndarray(frame_rgb, format='rgb24')
+        video_frame.pts = self._pts
+        video_frame.time_base = self._time_base
+        
+        # Tăng timestamp
+        self._pts += int(self._frame_interval * 90000)  # 90kHz clock
+        self._last_frame_time = time.time()
+        
+        # Debug log mỗi 30 frames (1 giây)
+        if self._pts % (90000 * 1) == 0:
+            logger.debug(f"📹 Video frame sent: pts={self._pts}, size={width}x{height}")
+        
+        return video_frame
+
+
+class PyAudioSourceTrack(MediaStreamTrack):
+    """Audio track sử dụng PyAudio (tương tự audio_handler.py)"""
+    kind = "audio"
+
+    def __init__(self, rate=48000, channels=1, frames_per_buffer=960, device_index=None, gain=1.0, noise_gate=0):
+        super().__init__()
+        self._rate = rate
+        self._channels = channels
+        self._chunk = frames_per_buffer
+        self._time_base = fractions.Fraction(1, rate)
+        self._pts = 0
+        self._gain = gain
+        self._noise_gate = noise_gate
+        self._queue = queue.Queue(maxsize=100)
+        self._frame_count = 0
+
+        try:
+            import pyaudio
+            self._pa = pyaudio.PyAudio()
+            
+            # USB mics typically support 48000 or 44100
+            supported_rates = [48000, 44100]
+            selected_rate = rate
+            
+            if device_index is not None:
+                # Test requested rate first
+                rate_supported = False
+                try:
+                    if self._pa.is_format_supported(
+                        rate,
+                        input_device=device_index,
+                        input_channels=channels,
+                        input_format=pyaudio.paInt16
+                    ):
+                        rate_supported = True
+                except Exception:
+                    pass
+                
+                # If not supported, try alternatives
+                if not rate_supported:
+                    for test_rate in supported_rates:
+                        if test_rate == rate:
+                            continue
+                        try:
+                            if self._pa.is_format_supported(
+                                test_rate,
+                                input_device=device_index,
+                                input_channels=channels,
+                                input_format=pyaudio.paInt16
+                            ):
+                                selected_rate = test_rate
+                                logger.info(f"⚠️ Rate {rate} not supported, using {selected_rate}")
+                                self._rate = selected_rate
+                                break
+                        except Exception:
+                            continue
+            
+            stream_kwargs = {
+                'format': pyaudio.paInt16,
+                'channels': self._channels,
+                'rate': self._rate,
+                'input': True,
+                'frames_per_buffer': self._chunk,
+                'stream_callback': self._on_audio,
+            }
+            
+            if device_index is not None:
+                stream_kwargs['input_device_index'] = device_index
+            
+            self._stream = self._pa.open(**stream_kwargs)
+            self._stream.start_stream()
+            
+            device_info = " (default)" if device_index is None else f" (device {device_index})"
+            logger.info(f"🎤 Using PyAudio microphone{device_info} with gain={self._gain}x, rate={self._rate}, noise_gate={self._noise_gate}")
+        except Exception as e:
+            logger.error(f"Failed to initialize PyAudio: {e}", exc_info=True)
+            raise
+
+    def _on_audio(self, in_data, frame_count, time_info, status_flags):
+        try:
+            self._queue.put_nowait(in_data)
+        except queue.Full:
+            # Drop oldest to make room
+            try:
+                _ = self._queue.get_nowait()
+            except Exception:
+                pass
+            try:
+                self._queue.put_nowait(in_data)
+            except Exception:
+                pass
+        return (None, 0)
+
+    async def recv(self):
+        # Wait for next chunk of audio from the callback
+        loop = asyncio.get_running_loop()
+        data = await loop.run_in_executor(None, self._queue.get)
+        
+        self._frame_count += 1
+        
+        # Apply gain and noise gate
+        if self._gain != 1.0 or self._noise_gate > 0:
+            # Convert to numpy for processing
+            samples = np.frombuffer(data, dtype=np.int16).copy()
+            
+            # Log audio levels every 100 frames (~2 seconds at 48kHz/960 buffer)
+            if self._frame_count % 100 == 1:
+                rms_before = np.sqrt(np.mean(samples.astype(np.float32) ** 2))
+                max_before = np.max(np.abs(samples))
+                logger.info(f"🎤 Audio levels BEFORE gain: RMS={rms_before:.0f}, Max={max_before}, Gain={self._gain}x")
+            
+            # Apply gain
+            if self._gain != 1.0:
+                samples = samples.astype(np.float32) * self._gain
+            
+            # Noise gate: suppress very quiet signals (reduce hiss/noise)
+            if self._noise_gate > 0:
+                samples[np.abs(samples) < self._noise_gate] = 0
+            
+            # Log audio levels after gain
+            if self._frame_count % 100 == 1:
+                rms_after = np.sqrt(np.mean(samples ** 2))
+                max_after = np.max(np.abs(samples))
+                logger.info(f"🔊 Audio levels AFTER gain: RMS={rms_after:.0f}, Max={max_after:.0f}, NoiseGate={self._noise_gate}")
+            
+            # Clip to prevent distortion
+            samples = np.clip(samples, -32768, 32767).astype(np.int16)
+            data = samples.tobytes()
+        
+        # Create an AudioFrame from raw int16 PCM
+        frame = av.AudioFrame(
+            format="s16",
+            layout="mono" if self._channels == 1 else "stereo",
+            samples=self._chunk,
+        )
+        frame.pts = self._pts
+        frame.sample_rate = self._rate
+        frame.time_base = self._time_base
+        # Update plane with raw bytes
+        frame.planes[0].update(data)
+        self._pts += self._chunk
+        return frame
+
+    def stop(self):
+        try:
+            if hasattr(self, "_stream") and self._stream:
+                self._stream.stop_stream()
+                self._stream.close()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "_pa") and self._pa:
+                self._pa.terminate()
+        except Exception:
+            pass
+        super().stop()
+
+
+
+
+
+
+class WebRTCManager:
+    """Quản lý kết nối WebRTC"""
+    
+    def __init__(self, device_id: str, mqtt_client=None):
+        """
+        Khởi tạo WebRTC Manager
+        
+        Args:
+            device_id: ID của thiết bị
+            mqtt_client: MQTT client để gửi signaling messages
+        """
+        
+        self.device_id = device_id
+        self.mqtt_client = mqtt_client
+        
+        # Peer connection
+        self.pc: Optional[RTCPeerConnection] = None
+        
+        # Media tracks
+        self.video_player = None
+        self.audio_player = None
+        
+        # ICE candidates buffer
+        self.pending_ice_candidates = deque()
+        
+        # Event loop
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self.webrtc_task = None
+        
+        # Callbacks
+        self.on_audio_track: Optional[Callable] = None
+        self.on_video_track: Optional[Callable] = None
+        self.on_connection_state_change: Optional[Callable] = None
+        
+        logger.info(f"✅ WebRTCManager initialized for device {device_id}")
+    
+    def set_mqtt_client(self, mqtt_client: "MQTTClient"):
+        """Set MQTT client sau khi khởi tạo"""
+        self.mqtt_client = mqtt_client
+    
+    async def initialize_peer_connection(self):
+        """Khởi tạo RTCPeerConnection"""
+        try:
+            # Đóng connection cũ nếu có
+            if self.pc and self.pc.connectionState != "closed":
+                await self.pc.close()
+                logger.info("🔒 Closed existing peer connection")
+            
+            # Tạo RTCPeerConnection với STUN servers (cho NAT traversal)
+            configuration = RTCConfiguration(iceServers=[
+                RTCIceServer(urls=[
+                    "stun:stun.l.google.com:19302",
+                    "stun:stun1.l.google.com:19302"]),
+            ])
+            self.pc = RTCPeerConnection(configuration=configuration)
+            
+            logger.info("✅ RTCPeerConnection created with STUN servers (will use HOST + SRFLX candidates)")
+            
+            # Setup event handlers
+            self._setup_event_handlers()
+            
+            # Setup media tracks
+            await self._setup_media_tracks()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize peer connection: {e}", exc_info=True)
+            return False
+    
+    def _setup_event_handlers(self):
+        """Thiết lập các event handlers cho peer connection"""
+        
+        @self.pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            state = self.pc.connectionState
+            emoji = {
+                "new": "🆕", 
+                "connecting": "🔄", 
+                "connected": "✅", 
+                "disconnected": "⚠️", 
+                "failed": "❌", 
+                "closed": "🔒"
+            }
+            logger.info(f"{emoji.get(state, '❓')} Connection state: {state}")
+            
+            if self.on_connection_state_change:
+                try:
+                    if asyncio.iscoroutinefunction(self.on_connection_state_change):
+                        await self.on_connection_state_change(state)
+                    else:
+                        self.on_connection_state_change(state)
+                except Exception as e:
+                    logger.error(f"Error in connection state callback: {e}", exc_info=True)
+        
+        @self.pc.on("track")
+        async def on_track(track):
+            logger.info(f"📥 Incoming track: kind={track.kind}, id={track.id}")
+            
+            if track.kind == "audio":
+                if self.on_audio_track:
+                    try:
+                        await self.on_audio_track(track)
+                    except Exception as e:
+                        logger.error(f"Error in audio track callback: {e}", exc_info=True)
+            
+            elif track.kind == "video":
+                if self.on_video_track:
+                    try:
+                        await self.on_video_track(track)
+                    except Exception as e:
+                        logger.error(f"Error in video track callback: {e}", exc_info=True)
+        
+        @self.pc.on("iceconnectionstatechange")
+        async def on_iceconnectionstatechange():
+            ice_state = self.pc.iceConnectionState
+            emoji = {
+                "new": "🆕", 
+                "checking": "🔍", 
+                "connected": "✅", 
+                "completed": "🏁", 
+                "failed": "❌", 
+                "disconnected": "⚠️", 
+                "closed": "🔒"
+            }
+            logger.info(f"{emoji.get(ice_state, '❓')} ICE connection state: {ice_state}")
+            
+            if ice_state == "connected":
+                logger.info("🎉 ICE connection established! Media should start flowing now.")
+            elif ice_state == "completed":
+                logger.info("🏁 ICE connection completed! All candidates checked.")
+            elif ice_state == "failed":
+                logger.error("❌ ICE connection FAILED! Check network/firewall settings.")
+                logger.error("💡 Tips:")
+                logger.error("   1. Ensure both devices are on same network")
+                logger.error("   2. Check router AP isolation settings")
+                logger.error("   3. Try enabling TURN server for NAT traversal")
+        
+        @self.pc.on("icegatheringstatechange")
+        async def on_icegatheringstatechange():
+            state = self.pc.iceGatheringState
+            logger.info(f"📡 ICE gathering state: {state}")
+            
+            if state == "complete":
+                # Debug: Check local description
+                if self.pc.localDescription:
+                    logger.debug(f"Local SDP has {len(self.pc.localDescription.sdp)} chars")
+                else:
+                    logger.warning("⚠️ No local description after ICE gathering complete")
+        
+        @self.pc.on("icecandidate")
+        async def on_icecandidate(candidate):
+            logger.info(f"🔔 on_icecandidate event triggered! candidate={candidate is not None}")  # ALWAYS log
+            if candidate:
+                cand_str = candidate.candidate
+                logger.info(f"🔍 Generated candidate: {cand_str}")  # Changed to INFO to ensure visibility
+                
+                # Publish HOST và SRFLX candidates (skip RELAY nếu không có TURN)
+                if "typ host" in cand_str:
+                    # Filter IPv6 nếu muốn chỉ dùng IPv4 trong LAN
+                    if ":" in cand_str and "typ host" in cand_str:
+                        # IPv6 host candidate - có thể skip nếu chỉ muốn IPv4
+                        logger.debug(f"⏭️ Skipping IPv6 HOST candidate: {cand_str[:80]}")
+                        return
+                    
+                    logger.info(f"🏠 HOST candidate (will publish): {cand_str}")
+                    
+                    # Publish candidate qua MQTT
+                    if self.mqtt_client:
+                        payload = {
+                            "candidate": candidate.candidate,
+                            "sdpMid": candidate.sdpMid,
+                            "sdpMLineIndex": candidate.sdpMLineIndex,
+                        }
+                        topic = f"device/{self.device_id}/webrtc/candidate"
+                        self.mqtt_client.publish(topic, payload)
+                        logger.info(f"📤 Published HOST candidate to {topic}")
+                    else:
+                        logger.warning("⚠️ MQTT client not available, cannot publish candidate")
+                        
+                elif "typ srflx" in cand_str:
+                    # SRFLX từ STUN - cho phép để NAT traversal
+                    logger.info(f"🌐 SRFLX candidate (will publish): {cand_str}")
+                    
+                    if self.mqtt_client:
+                        payload = {
+                            "candidate": candidate.candidate,
+                            "sdpMid": candidate.sdpMid,
+                            "sdpMLineIndex": candidate.sdpMLineIndex,
+                        }
+                        topic = f"device/{self.device_id}/webrtc/candidate"
+                        self.mqtt_client.publish(topic, payload)
+                        logger.info(f"📤 Published SRFLX candidate to {topic}")
+                        
+                elif "typ relay" in cand_str:
+                    # RELAY chỉ khi có TURN - skip nếu không có
+                    logger.info(f"⏭️ Skipping RELAY candidate (no TURN server): {cand_str[:80]}")
+                else:
+                    logger.info(f"⏭️ Skipping unknown candidate type: {cand_str[:80]}")
+            else:
+                logger.info("🏁 ICE gathering complete (null candidate)")
+    
+    async def _setup_media_tracks(self):
+        """Setup audio và video tracks từ camera/microphone"""
+        try:
+            # Video track - Lấy camera từ container
+            try:
+                camera = container.get("camera")
+                if camera:
+                    video_track = CameraVideoTrack(camera, fps=30)
+                    self.pc.addTrack(video_track)
+                    logger.info(f"✅ Video track added from container camera")
+                    self.video_player = video_track  # Store reference
+                else:
+                    logger.warning("⚠️ No camera in container - video call will be audio-only")
+                    self.video_player = None
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Could not setup video track: {e}", exc_info=True)
+                self.video_player = None
+            
+            # Audio track - Microphone sử dụng PyAudio (tương tự audio_handler.py)
+            try:
+                # Lấy mic config từ config
+                try:
+                    from config import MIC_INDEX, AUDIO_SAMPLE_RATE
+                    requested_rate = AUDIO_SAMPLE_RATE
+                except ImportError:
+                    requested_rate = 48000
+                
+                # Lấy gain và noise gate từ config (nếu có)
+                try:
+                    from config import MICROPHONE_GAIN, MICROPHONE_NOISE_GATE
+                    mic_gain = MICROPHONE_GAIN
+                    noise_gate = MICROPHONE_NOISE_GATE
+                except ImportError:
+                    mic_gain = 1.0
+                    noise_gate = 0
+                
+                # 🎤 Jetson Nano: Tìm USB Audio Device (card 3) cho microphone
+                mic_device_index = None
+                if platform.system() == "Linux":
+                    try:
+                        import pyaudio
+                        pa = pyaudio.PyAudio()
+                        
+                        # Find USB Audio Device with input channels
+                        with SuppressALSAErrors():
+                            try:
+                                info = pa.get_host_api_info_by_index(0)
+                                numdevices = info.get('deviceCount', 0)
+                                for i in range(numdevices):
+                                    try:
+                                        device_info = pa.get_device_info_by_host_api_device_index(0, i)
+                                        name = device_info.get('name', '')
+                                        max_in = device_info.get('maxInputChannels', 0)
+                                        
+                                        # Look for USB Audio Device or hw:3,0 with input
+                                        if (max_in > 0 and 
+                                            ('USB Audio Device' in name or 'hw:3,0' in name)):
+                                            mic_device_index = i
+                                            logger.info(f"🎤 Found USB mic device: {name} (index={i})")
+                                            break
+                                    except Exception:
+                                        continue
+                            except Exception as e:
+                                logger.warning(f"Could not enumerate audio devices: {e}")
+                        
+                        pa.terminate()
+                    except ImportError:
+                        logger.warning("PyAudio not available, cannot find USB mic device")
+                    except Exception as e:
+                        logger.warning(f"Error finding USB mic device: {e}")
+                
+                # Tạo audio track từ microphone sử dụng PyAudio
+                try:
+                    audio_track = PyAudioSourceTrack(
+                        rate=requested_rate,
+                        channels=1,
+                        frames_per_buffer=960,
+                        device_index=mic_device_index,
+                        gain=mic_gain,
+                        noise_gate=noise_gate
+                    )
+                    self.pc.addTrack(audio_track)
+                    self.audio_player = audio_track  # Store reference
+                    logger.info(f"✅ Audio track added using PyAudio (device={mic_device_index}, rate={requested_rate}, gain={mic_gain}x)")
+                except ImportError:
+                    logger.warning("⚠️ PyAudio not installed - microphone will not work")
+                    self.audio_player = None
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not setup audio track with PyAudio: {e}", exc_info=True)
+                    self.audio_player = None
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Could not setup audio track: {e}", exc_info=True)
+                self.audio_player = None
+                
+        except Exception as e:
+            logger.error(f"❌ Error setting up media tracks: {e}", exc_info=True)
+    
+    async def handle_offer(self, sdp: str, offer_type: str = "offer"):
+        """
+        Xử lý offer từ mobile
+        
+        Args:
+            sdp: Session Description Protocol string
+            offer_type: Loại offer (mặc định "offer")
+        """
+        try:
+            logger.info("📞 Handling WebRTC offer from mobile")
+            
+            # Khởi tạo peer connection
+            success = await self.initialize_peer_connection()
+            if not success:
+                logger.error("❌ Failed to initialize peer connection")
+                return False
+            
+            # Clear pending ICE candidates
+            self.pending_ice_candidates.clear()
+            
+            # Set remote description (offer)
+            logger.info("📥 Setting remote description (offer)...")
+            remote_desc = RTCSessionDescription(sdp=sdp, type=offer_type)
+            await self.pc.setRemoteDescription(remote_desc)
+            logger.info("✅ Remote description set successfully")
+            
+            # Process any buffered ICE candidates
+            await self._process_pending_candidates()
+            
+            # Create answer
+            logger.info("📤 Creating answer...")
+            answer = await self.pc.createAnswer()
+            logger.info(f"✅ Answer created: type={answer.type}, sdp_length={len(answer.sdp)}")
+            
+            # Set local description - this will start ICE gathering
+            await self.pc.setLocalDescription(answer)
+            logger.info(f"✅ Local description set: type={self.pc.localDescription.type}")
+            
+            # ⚠️ CRITICAL: Wait for ICE gathering to complete
+            logger.info("⏳ Waiting for ICE gathering to complete...")
+            timeout = 10  # 10 seconds timeout
+            start_time = time.time()
+            while self.pc.iceGatheringState == "gathering" and (time.time() - start_time) < timeout:
+                await asyncio.sleep(0.1)
+            
+            logger.info(f"📡 ICE gathering finished: {self.pc.iceGatheringState}")
+            
+            # Extract candidates từ SDP và publish manually (aiortc có thể embed trong SDP)
+            if self.pc.localDescription:
+                sdp = self.pc.localDescription.sdp
+                logger.info(f"📄 Extracting candidates from SDP (length={len(sdp)})")
+                
+                # Parse SDP để tìm candidates
+                candidates_found = 0
+                for line in sdp.split('\n'):
+                    if line.startswith('a=candidate:'):
+                        # Extract candidate string
+                        cand_str = line.replace('a=candidate:', '').strip()
+                        logger.info(f"🔍 Found candidate in SDP: {cand_str[:80]}")
+                        
+                        # Parse candidate
+                        parts = cand_str.split()
+                        if len(parts) >= 8:
+                            foundation = parts[0]
+                            component = parts[1]
+                            protocol = parts[2]
+                            priority = parts[3]
+                            ip = parts[4]
+                            port = parts[5]
+                            typ = parts[6] if len(parts) > 6 else ""
+                            
+                            # Chỉ publish HOST và SRFLX IPv4 candidates
+                            if typ == "typ" and len(parts) > 7:
+                                candidate_type = parts[7]
+                                
+                                # Skip IPv6
+                                if ":" in ip:
+                                    logger.debug(f"⏭️ Skipping IPv6 candidate: {ip}:{port}")
+                                    continue
+                                
+                                # Skip RELAY
+                                if candidate_type == "relay":
+                                    logger.debug(f"⏭️ Skipping RELAY candidate")
+                                    continue
+                                
+                                # Publish HOST và SRFLX
+                                if candidate_type in ["host", "srflx"]:
+                                    # Determine sdpMid và sdpMLineIndex từ SDP context
+                                    # Tìm m= line trước đó để biết mid
+                                    sdp_mid = "0"  # Default
+                                    sdp_mline_index = 0
+                                    
+                                    # Try to find mid from SDP
+                                    sdp_lines = sdp.split('\n')
+                                    for i, l in enumerate(sdp_lines):
+                                        if l == line:
+                                            # Look backwards for m= line
+                                            for j in range(i, -1, -1):
+                                                if sdp_lines[j].startswith('m='):
+                                                    sdp_mline_index = sdp_lines[:j+1].count('m=') - 1
+                                                    break
+                                                elif sdp_lines[j].startswith('a=mid:'):
+                                                    sdp_mid = sdp_lines[j].replace('a=mid:', '').strip()
+                                                    break
+                                            break
+                                    
+                                    # Publish candidate
+                                    if self.mqtt_client:
+                                        payload = {
+                                            "candidate": f"candidate:{cand_str}",
+                                            "sdpMid": sdp_mid,
+                                            "sdpMLineIndex": sdp_mline_index,
+                                        }
+                                        topic = f"device/{self.device_id}/webrtc/candidate"
+                                        self.mqtt_client.publish(topic, payload)
+                                        candidates_found += 1
+                                        logger.info(f"📤 Published {candidate_type.upper()} candidate from SDP: {ip}:{port} (mid={sdp_mid}, mline={sdp_mline_index})")
+                
+                if candidates_found > 0:
+                    logger.info(f"✅ Published {candidates_found} candidates extracted from SDP")
+                else:
+                    logger.warning("⚠️ No candidates found in SDP or all were filtered")
+            
+            # Check if we have any local candidates
+            try:
+                # Try to access internal ICE transport to check candidates
+                if hasattr(self.pc, '_RTCPeerConnection__sctp'):
+                    sctp = self.pc._RTCPeerConnection__sctp
+                    if sctp and hasattr(sctp, 'transport') and hasattr(sctp.transport, '_connection'):
+                        ice_conn = sctp.transport._connection
+                        local_candidates = ice_conn.local_candidates if hasattr(ice_conn, 'local_candidates') else []
+                        logger.info(f"📊 Local candidates generated: {len(local_candidates)}")
+                        for i, c in enumerate(local_candidates[:3]):
+                            logger.info(f"   {i+1}. {c.type.upper()}: {c.host}:{c.port}")
+                else:
+                    logger.warning("⚠️ Cannot access internal ICE transport to check candidates")
+            except Exception as e:
+                logger.warning(f"⚠️ Error checking local candidates: {e}")
+            
+            # Publish answer via MQTT
+            if self.mqtt_client:
+                payload = {
+                    "sdp": answer.sdp,
+                    "type": answer.type
+                }
+                topic = f"device/{self.device_id}/webrtc/answer"
+                self.mqtt_client.publish(topic, payload, qos=1, retain=False)
+                logger.info(f"📤 Answer published to {topic}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error handling offer: {e}", exc_info=True)
+            return False
+    
+    async def handle_ice_candidate(self, candidate_data: dict):
+        """
+        Xử lý ICE candidate từ mobile
+        
+        Args:
+            candidate_data: Dictionary chứa candidate, sdpMid, sdpMLineIndex
+        """
+        try:
+            # Buffer nếu peer connection chưa sẵn sàng
+            if not self.pc:
+                logger.info("⏳ Buffering ICE candidate (no peer connection)")
+                self.pending_ice_candidates.append(candidate_data)
+                return
+            
+            if not self.pc.remoteDescription:
+                logger.info("⏳ Buffering ICE candidate (no remote description)")
+                self.pending_ice_candidates.append(candidate_data)
+                return
+            
+            # Get candidate string
+            candidate_str = candidate_data.get("candidate")
+            if not candidate_str:
+                logger.debug("Empty ICE candidate (end-of-candidates)")
+                return
+            
+            # Accept HOST và SRFLX candidates từ mobile (skip RELAY nếu không có TURN)
+            if "typ host" not in candidate_str and "typ srflx" not in candidate_str:
+                if "typ relay" in candidate_str:
+                    logger.debug(f"⏭️ Skipping RELAY candidate from mobile (no TURN server)")
+                else:
+                    logger.debug(f"⏭️ Skipping unknown candidate type: {candidate_str[:60]}")
+                return
+            
+            # Filter IPv6 nếu muốn chỉ dùng IPv4 trong LAN
+            if "typ host" in candidate_str and ":" in candidate_str:
+                # IPv6 host candidate - có thể skip nếu chỉ muốn IPv4
+                logger.debug(f"⏭️ Skipping IPv6 HOST candidate from mobile: {candidate_str[:60]}")
+                return
+            
+            # Parse candidate từ SDP string
+            sdp_mid = candidate_data.get("sdpMid")
+            sdp_mline_index = candidate_data.get("sdpMLineIndex")
+            
+            if candidate_from_sdp:
+                # Parse candidate string thành RTCIceCandidate object
+                candidate = candidate_from_sdp(candidate_str)
+                candidate.sdpMid = sdp_mid
+                candidate.sdpMLineIndex = sdp_mline_index
+            else:
+                # Fallback: Tạo object đơn giản (có thể không hoạt động)
+                logger.warning("candidate_from_sdp not available, using workaround")
+                # aiortc yêu cầu parse candidate, không thể dùng string trực tiếp
+                # Bỏ qua candidate này
+                logger.warning(f"Skipping candidate (cannot parse): {candidate_str[:60]}")
+                return
+            
+            # Add HOST candidate vào peer connection
+            await self.pc.addIceCandidate(candidate)
+            logger.info(f"✅ HOST candidate added from mobile: {candidate_str[:60]}...")
+            
+        except Exception as e:
+            logger.error(f"❌ Error handling ICE candidate: {e}", exc_info=True)
+ 
+    
+    async def _process_pending_candidates(self):
+        """Xử lý tất cả ICE candidates đang chờ"""
+        if not self.pc or not self.pc.remoteDescription:
+            return
+        
+        processed = 0
+        while self.pending_ice_candidates:
+            candidate_data = self.pending_ice_candidates.popleft()
+            try:
+                await self.handle_ice_candidate(candidate_data)
+                processed += 1
+            except Exception as e:
+                logger.error(f"Error processing pending candidate: {e}")
+        
+        if processed > 0:
+            logger.info(f"✅ Processed {processed} pending ICE candidates")
+    
+    async def close(self):
+        """Đóng peer connection"""
+        try:
+            if self.pc and self.pc.connectionState != "closed":
+                await self.pc.close()
+                logger.info("🔒 Peer connection closed")
+            
+            # Stop video track (CameraVideoTrack không cần stop vì camera được quản lý bởi container)
+            if self.video_player:
+                try:
+                    if hasattr(self.video_player, 'stop'):
+                        self.video_player.stop()
+                except Exception:
+                    pass
+            
+            # Stop audio player
+            if self.audio_player:
+                try:
+                    self.audio_player.stop()
+                except Exception:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"Error closing peer connection: {e}")
+    
+    def start_event_loop(self):
+        """Khởi động event loop riêng cho WebRTC trong background thread"""
+        if self.loop and self.loop.is_running():
+            return  # Đã chạy rồi
+        
+        loop_ref = {'loop': None}  # Use dict để tránh closure issue
+        
+        def run_event_loop():
+            """Chạy event loop trong thread riêng"""
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop_ref['loop'] = loop
+                self.loop = loop  # Set vào instance
+                logger.info("🔄 WebRTC event loop started in background thread")
+                loop.run_forever()
+            except Exception as e:
+                logger.error(f"❌ WebRTC event loop error: {e}", exc_info=True)
+            finally:
+                if loop_ref['loop']:
+                    try:
+                        loop_ref['loop'].close()
+                        logger.info("🔒 WebRTC event loop closed")
+                    except Exception:
+                        pass
+        
+        # Start event loop thread
+        import threading
+        self.loop_thread = threading.Thread(target=run_event_loop, daemon=True)
+        self.loop_thread.start()
+        
+        # Đợi một chút để loop khởi động
+        import time
+        max_wait = 10  # Tối đa đợi 1 giây
+        waited = 0
+        while waited < max_wait and (not self.loop or not self.loop.is_running()):
+            time.sleep(0.1)
+            waited += 1
+        
+        if self.loop and self.loop.is_running():
+            logger.info("✅ WebRTC event loop is running")
+        else:
+            logger.warning("⚠️ WebRTC event loop may not be ready yet")
+    
+    def run_async(self, coro):
+        """Chạy coroutine trong event loop"""
+        # Đảm bảo event loop đã chạy
+        if not self.loop or not self.loop.is_running():
+            self.start_event_loop()
+            # Đợi thêm một chút
+            import time
+            time.sleep(0.2)
+        
+        if self.loop and self.loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+            return future
+        else:
+            # Fallback: chạy trong thread riêng
+            logger.warning("⚠️ Event loop not available, using fallback")
+            return asyncio.run(coro)
+
