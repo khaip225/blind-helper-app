@@ -712,9 +712,10 @@ class WebRTCManager:
                 "isEmergency": True  # Flag to indicate SOS call
             }
             
+            # Don't json.dumps here - client.publish() will do it
             self.mqtt_client.publish(
                 topic,
-                json.dumps(offer_message),
+                offer_message,
                 qos=1
             )
             

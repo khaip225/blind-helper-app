@@ -6,7 +6,8 @@ Main MQTT Application
 import time
 import sys
 import select
-import asyncio
+import termios
+import tty
 from module.camera.camera_direct import CameraDirect
 from mqtt import MQTTClient, VoiceMQTT, GPSMQTT
 from log import setup_logger
@@ -49,46 +50,62 @@ def main():
     # gps = GPSMQTT(mqtt_client)
     # gps.publish_gps(qos=1)
     
-    mcp.run(transport='sse')
+    # MCP server - comment out vì nó chiếm stdin, làm keyboard listener không hoạt động
+    # mcp.run(transport='sse')
     
     mqtt_client.publish(TOPICS['device_ping'], {"data": "PING"})
     
     # Publish initial device info
-    print("Device started. Press Ctrl+C to exit.")
-    print("🆘 Press ENTER to initiate SOS emergency call")
+    logger.info("=" * 60)
+    logger.info("Device started successfully!")
+    logger.info("SOS FEATURE: Type 'sos' and press ENTER to initiate emergency call")
+    logger.info("=" * 60)
+    sys.stdout.flush()
+    
+    # Set stdin to non-blocking mode for SSH compatibility
+    old_settings = termios.tcgetattr(sys.stdin)
+    input_buffer = ""
     
     try:
-        # Get event loop for async operations
-        loop = asyncio.get_event_loop()
+        # Set terminal to cbreak mode for immediate key detection
+        tty.setcbreak(sys.stdin.fileno())
+        logger.info("Keyboard listener active - type 'sos' to trigger emergency call...")
         
         while True:
-            # Check for keyboard input (non-blocking on Linux/Mac)
-            if sys.platform != "win32":
-                # Unix-like systems (Linux, Mac)
-                if select.select([sys.stdin], [], [], 0)[0]:
-                    key = sys.stdin.read(1)
-                    if key == '\n':  # Enter key
-                        logger.info("🆘 ENTER pressed - initiating SOS call...")
-                        # Trigger SOS call asynchronously
-                        loop.run_until_complete(mqtt_client.handler.initiate_sos_call())
-            else:
-                # Windows - use msvcrt
-                try:
-                    import msvcrt
-                    if msvcrt.kbhit():
-                        key = msvcrt.getch()
-                        if key == b'\r':  # Enter key on Windows
-                            logger.info("🆘 ENTER pressed - initiating SOS call...")
-                            # Trigger SOS call asynchronously
-                            loop.run_until_complete(mqtt_client.handler.initiate_sos_call())
-                except ImportError:
-                    pass  # msvcrt not available
+            # Check for keyboard input (non-blocking)
+            if select.select([sys.stdin], [], [], 0)[0]:
+                key = sys.stdin.read(1)
+                
+                if key == '\n' or key == '\r':  # Enter key
+                    if input_buffer.lower().strip() == 'sos':
+                        logger.info("=" * 60)
+                        logger.info(">>> SOS COMMAND DETECTED - INITIATING EMERGENCY CALL <<<")
+                        logger.info("=" * 60)
+                        # Trigger SOS call using WebRTC's own event loop
+                        mqtt_client.handler.webrtc.run_async(
+                            mqtt_client.handler.initiate_sos_call()
+                        )
+                    input_buffer = ""  # Clear buffer after Enter
+                elif key == '\x7f' or key == '\x08':  # Backspace
+                    input_buffer = input_buffer[:-1]
+                elif len(key) == 1 and key.isprintable():
+                    input_buffer += key
+                    # Show feedback
+                    if len(input_buffer) <= 10:  # Limit buffer display
+                        sys.stdout.write(key)
+                        sys.stdout.flush()
             
-            time.sleep(0.1)  # Reduce sleep time to make input more responsive
+            time.sleep(0.05)  # Check every 50ms for better responsiveness
             
     except KeyboardInterrupt as e:
         logger.error(f"Lỗi: {e}", exc_info=True)
         logger.info("Dừng hệ thống...")
+    finally:
+        # Restore terminal settings
+        try:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+        except:
+            pass
         # obstacle_system.stop()
         camera.stop()
         voice.stop()

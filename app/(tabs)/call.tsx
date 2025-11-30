@@ -1,13 +1,24 @@
 import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { RTCView, mediaDevices } from 'react-native-webrtc';
 import { useMQTT } from '../../context/MQTTContext';
+
+// Import InCallManager for speaker control
+let InCallManager: any = null;
+try {
+    const incallModule = require('react-native-incall-manager');
+    InCallManager = incallModule?.default || incallModule;
+} catch (err) {
+    console.warn('[CallScreen] react-native-incall-manager not available:', err);
+}
 
 export default function CallScreen() {
     const { localStream, remoteStream, hangup, callState, answerCall } = useMQTT();
     const router = useRouter();
     const navigation = useNavigation();
+    const [isSpeakerOn, setIsSpeakerOn] = useState(true); // Default: loa ngoài ON
+    const initialSpeakerSetRef = React.useRef(false); // Track if speaker was set initially
 
     // Tự động ẩn tab bar khi vào màn hình và hiện lại khi thoát
     useFocusEffect(
@@ -18,19 +29,30 @@ export default function CallScreen() {
         }, [navigation])
     );
 
+    // Set speaker ONLY once when remoteStream first appears
     useEffect(() => {
-        if (remoteStream) {
-            console.log("✅ [CallScreen] Đã nhận được remoteStream!", remoteStream.toURL());
-            // Bật loa ngoài trên Android để nghe rõ âm thanh từ thiết bị
-            if (Platform.OS === 'android') {
+        if (remoteStream && !initialSpeakerSetRef.current) {
+            console.log("✅ [CallScreen] Remote stream received!", remoteStream.toURL());
+            initialSpeakerSetRef.current = true;
+            
+            // Enable speaker by default on first connection
+            if (InCallManager) {
+                try {
+                    InCallManager.setForceSpeakerphoneOn(true);
+                    console.log('🔊 [CallScreen] Initial speaker: ON');
+                } catch (e) {
+                    console.warn('⚠️ [CallScreen] InCallManager error:', e);
+                }
+            } else if (Platform.OS === 'android') {
                 try {
                     (mediaDevices as any).setSpeakerphoneOn?.(true);
-                    console.log('🔊 [CallScreen] Speakerphone ON');
+                    console.log('🔊 [CallScreen] Initial speaker: ON');
                 } catch (e) {
-                    console.log('ℹ️ [CallScreen] setSpeakerphoneOn not available:', e);
+                    console.warn('⚠️ [CallScreen] setSpeakerphoneOn not available:', e);
                 }
             }
-            // Đảm bảo các track audio/video được enable
+            
+            // Ensure audio tracks are enabled
             try {
                 const audioTracks = remoteStream.getAudioTracks?.() || [];
                 const videoTracks = remoteStream.getVideoTracks?.() || [];
@@ -42,18 +64,38 @@ export default function CallScreen() {
                     if (t.enabled === false) t.enabled = true;
                 });
                 console.log('[CallScreen] Tracks -> video:', videoTracks.length, 'audio:', audioTracks.length);
-                
-                // 🔊 Thông báo user tăng volume điện thoại nếu âm thanh nhỏ
-                console.log('💡 [CallScreen] TIP: Nếu âm thanh nhỏ, hãy tăng volume điện thoại lên MAX!');
-            } catch {}
-        } else {
-            console.log("🟡 [CallScreen] remoteStream hiện đang là null.");
+            } catch (e) {
+                console.warn('[CallScreen] Error enabling tracks:', e);
+            }
         }
-    }, [remoteStream]);
+    }, [remoteStream]); // Only depend on remoteStream, NOT isSpeakerOn
+
+    const toggleSpeaker = () => {
+        const newSpeakerState = !isSpeakerOn;
+        setIsSpeakerOn(newSpeakerState);
+        
+        if (InCallManager) {
+            try {
+                InCallManager.setForceSpeakerphoneOn(newSpeakerState);
+                console.log(`🔊 [CallScreen] Toggled speaker: ${newSpeakerState ? 'ON' : 'OFF'}`);
+            } catch (e) {
+                console.warn('[CallScreen] Failed to toggle speaker:', e);
+            }
+        } else if (Platform.OS === 'android') {
+            try {
+                (mediaDevices as any).setSpeakerphoneOn?.(newSpeakerState);
+                console.log(`🔊 [CallScreen] Toggled speaker: ${newSpeakerState ? 'ON' : 'OFF'}`);
+            } catch (e) {
+                console.warn('[CallScreen] Failed to toggle speaker:', e);
+            }
+        }
+    };
 
     // Không tự động trả lời nữa – người dùng phải bấm nút Trả lời
 
     const handleHangup = () => {
+        // Reset speaker setup tracking for next call
+        initialSpeakerSetRef.current = false;
         hangup();
         if (router.canGoBack()) {
             router.back();
@@ -110,6 +152,14 @@ export default function CallScreen() {
 
             {/* Các nút điều khiển */}
             <View style={styles.controls}>
+                <TouchableOpacity 
+                    style={[styles.button, styles.speakerButton, isSpeakerOn && styles.speakerButtonActive]} 
+                    onPress={toggleSpeaker}
+                >
+                    <Text style={styles.buttonText}>
+                        {isSpeakerOn ? '🔊 Loa ngoài' : '🔇 Loa trong'}
+                    </Text>
+                </TouchableOpacity>
                 <TouchableOpacity style={[styles.button, styles.hangupButton]} onPress={handleHangup}>
                     <Text style={styles.buttonText}>❌ Cúp máy</Text>
                 </TouchableOpacity>
@@ -156,6 +206,12 @@ const styles = StyleSheet.create({
     },
     hangupButton: {
         backgroundColor: 'red',
+    },
+    speakerButton: {
+        backgroundColor: '#555',
+    },
+    speakerButtonActive: {
+        backgroundColor: '#4CAF50',
     },
     answerButton: {
         backgroundColor: 'green',

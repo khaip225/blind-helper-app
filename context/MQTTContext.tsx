@@ -395,22 +395,19 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     // Tentatively mark connected here; ICE handler will also confirm
                     setCallState('connected');
                     
-                    // 🔊 Enable speakerphone when remote stream is received
+                    // 🔊 Initialize InCallManager (but don't force speaker - let call.tsx handle it)
                     console.log('[Audio] 🔍 InCallManager type:', typeof InCallManager);
-                    console.log('[Audio] 🔍 InCallManager.start type:', typeof InCallManager?.start);
                     
                     if (InCallManager && typeof InCallManager.start === 'function') {
                         try {
-                            console.log('[Audio] 🔊 Attempting to enable speakerphone...');
+                            console.log('[Audio] 📞 Starting InCallManager session...');
                             InCallManager.start({ media: 'video', ringback: '' });
-                            InCallManager.setForceSpeakerphoneOn(true);
-                            InCallManager.setSpeakerphoneOn(true);
-                            console.log('[Audio] ✅ Speakerphone enabled');
+                            console.log('[Audio] ✅ InCallManager session started (speaker control delegated to UI)');
                         } catch (err) {
-                            console.error('[Audio] ❌ Failed to enable speakerphone:', err);
+                            console.error('[Audio] ❌ Failed to start InCallManager:', err);
                         }
                     } else {
-                        console.warn('[Audio] ⚠️ InCallManager not properly linked - try rebuild: npx expo prebuild --clean && npx expo run:android');
+                        console.warn('[Audio] ⚠️ InCallManager not available');
                     }
                 }
             } catch (err) {
