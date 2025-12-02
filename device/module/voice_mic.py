@@ -87,62 +87,72 @@ class VoiceStreamer:
 
     def _listening_loop(self):
         """Vòng lặp lắng nghe liên tục"""
+        stream = None
         try:
-            with sd.InputStream(
+            stream = sd.InputStream(
                 device=self.mic_index,
                 channels=1,
                 samplerate=self.sample_rate,
                 dtype='int16',
                 blocksize=self.chunk_samples
-            ) as stream:
-                print("🎧 Đang lắng nghe... (nói gì đó để bắt đầu thu âm)")
+            )
+            stream.start()
+            print("🎧 Đang lắng nghe... (nói gì đó để bắt đầu thu âm)")
 
-                while self.is_listening:
-                    audio_chunk, overflowed = stream.read(self.chunk_samples)
-                    if overflowed:
-                        print("⚠️ Audio buffer overflow!")
+            while self.is_listening:
+                audio_chunk, overflowed = stream.read(self.chunk_samples)
+                if overflowed:
+                    print("⚠️ Audio buffer overflow!")
 
-                    if len(audio_chunk) > 0:
-                        # Chuyển đổi sang float32 cho VAD và áp dụng chuẩn hóa biên độ
-                        audio_float = audio_chunk.astype(np.float32) / 32768.0
+                if len(audio_chunk) > 0:
+                    # Chuyển đổi sang float32 cho VAD và áp dụng chuẩn hóa biên độ
+                    audio_float = audio_chunk.astype(np.float32) / 32768.0
 
-                        # Xử lý VAD
-                        vad_result = self.vad.process_audio_chunk(audio_float)
+                    # Xử lý VAD
+                    vad_result = self.vad.process_audio_chunk(audio_float)
 
-                        # Gọi callbacks
-                        if self.on_speech_data:
-                            self.on_speech_data(audio_chunk, int(
-                                time.time() * 1000), vad_result)
+                    # Gọi callbacks
+                    if self.on_speech_data:
+                        self.on_speech_data(audio_chunk, int(
+                            time.time() * 1000), vad_result)
 
-                        if vad_result['action'] == 'speech_complete':
-                            if self.on_speech_complete:
-                                # Chuyển đổi từ float32 về int16 để đảm bảo định dạng nhất quán với record_audio
-                                audio_data = vad_result['audio_data']
-                                int16_audio = (
-                                    audio_data * 32768.0).astype(np.int16).tobytes()
-                                self.on_speech_complete(
-                                    int16_audio, vad_result['duration'])
-                                save_dir = "debug"
-                                os.makedirs(save_dir, exist_ok=True)
-                                file_path = os.path.join(
-                                    BASE_DIR, save_dir, f"audio_mic.wav")
-                                try:
-                                    sf.write(
-                                        file_path, vad_result['audio_data'], self.sample_rate, subtype='PCM_16')
-                                    logger.debug(
-                                        f"💾 Đã lưu file âm thanh: {file_path}")
-                                except Exception as e:
-                                    logger.error(
-                                        f"❌ Lỗi khi lưu file âm thanh: {e}")
-                        elif vad_result['action'] == 'speaking' and not self.vad.is_speaking:
-                            if self.on_speech_start:
-                                self.on_speech_start()
+                    if vad_result['action'] == 'speech_complete':
+                        if self.on_speech_complete:
+                            # Chuyển đổi từ float32 về int16 để đảm bảo định dạng nhất quán với record_audio
+                            audio_data = vad_result['audio_data']
+                            int16_audio = (
+                                audio_data * 32768.0).astype(np.int16).tobytes()
+                            self.on_speech_complete(
+                                int16_audio, vad_result['duration'])
+                            save_dir = "debug"
+                            os.makedirs(save_dir, exist_ok=True)
+                            file_path = os.path.join(
+                                BASE_DIR, save_dir, f"audio_mic.wav")
+                            try:
+                                sf.write(
+                                    file_path, vad_result['audio_data'], self.sample_rate, subtype='PCM_16')
+                                logger.debug(
+                                    f"💾 Đã lưu file âm thanh: {file_path}")
+                            except Exception as e:
+                                logger.error(
+                                    f"❌ Lỗi khi lưu file âm thanh: {e}")
+                    elif vad_result['action'] == 'speaking' and not self.vad.is_speaking:
+                        if self.on_speech_start:
+                            self.on_speech_start()
 
         except Exception as e:
             print(f"❌ Lỗi lắng nghe: {e}")
             import traceback
             traceback.print_exc()
         finally:
+            # ✅ Đảm bảo close stream để giải phóng USB mic device
+            if stream is not None:
+                try:
+                    stream.stop()
+                    stream.close()
+                    print("🔒 Audio stream closed and device released")
+                except Exception as e:
+                    print(f"⚠️ Error closing stream: {e}")
             self.is_listening = False
 
     def __del__(self):

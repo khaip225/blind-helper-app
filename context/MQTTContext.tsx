@@ -343,19 +343,46 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Get local media
         console.log('[WebRTC] Requesting camera/microphone access...');
         const stream = await mediaDevices.getUserMedia({ 
-            audio: true,
+            audio: {
+                echoCancellation: true,        // ✅ Quan trọng: Loại bỏ echo
+                noiseSuppression: true,        // ✅ Giảm noise nền
+                autoGainControl: false,        // ❌ TẮT auto gain để tự control volume
+                sampleRate: 48000,
+                channelCount: 1,               // Mono
+                volume: 0.3,                   // ✅ Giảm volume xuống 30% để tránh clip/distort
+            } as any,
             video: {
                 width: { ideal: 640 },
                 height: { ideal: 480 },
                 frameRate: { ideal: 30 }
             }
         });
-        console.log('[WebRTC] Got local stream');
+        console.log('[WebRTC] Got local stream with audio + video');
+        
+        // ✅ Giảm gain của audio track để tránh clipping/distortion
+        stream.getAudioTracks().forEach(track => {
+            try {
+                const audioTrack = track as any;
+                // Apply constraints to reduce volume
+                if (audioTrack.applyConstraints) {
+                    audioTrack.applyConstraints({
+                        volume: 0.3,
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: false,
+                    }).catch((err: any) => console.warn('[WebRTC] Could not apply audio constraints:', err));
+                }
+                console.log('[WebRTC] 🎤 Audio track volume reduced to 30%');
+            } catch (err) {
+                console.warn('[WebRTC] Error adjusting audio track:', err);
+            }
+        });
+        
         setLocalStream(stream);
 
         // Add tracks to peer connection
         stream.getTracks().forEach(track => {
-            console.log(`[WebRTC] Adding ${track.kind} track`);
+            console.log(`[WebRTC] Adding ${track.kind} track (enabled=${track.enabled})`);
             pc.addTrack(track, stream);
         });
 

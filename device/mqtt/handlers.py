@@ -78,7 +78,7 @@ class MessageHandler:
         
         # Playback config (có thể lấy từ config.py nếu có)
         self.PLAYBACK_OUTPUT_RATE = 48000  # Default 48kHz cho WebRTC
-        self.PLAYBACK_GAIN = 1.0
+        self.PLAYBACK_GAIN = 0.3  # ✅ Giảm xuống 30% để tránh clipping từ phone mic
         self.PLAYBACK_AUTO_GAIN = False
         self.PLAYBACK_TARGET_RMS = 5000.0
         self.PLAYBACK_MAX_GAIN = 2.0
@@ -104,6 +104,10 @@ class MessageHandler:
             try:
                 self.voice_mqtt.pause_vad()
                 logger.info("⏸️ VAD paused for SOS call")
+                
+                # ✅ Đợi một chút để đảm bảo sounddevice đã close stream
+                await asyncio.sleep(0.5)  # 500ms để device được release
+                logger.info("✅ Device should be released now")
             except Exception as e:
                 logger.error(f"Error pausing VAD: {e}")
         
@@ -164,6 +168,10 @@ class MessageHandler:
                 try:
                     self.voice_mqtt.pause_vad()
                     logger.info("⏸️ VAD paused BEFORE WebRTC initialization")
+                    
+                    # ✅ Đợi một chút để đảm bảo sounddevice đã close stream
+                    time.sleep(0.5)  # 500ms để device được release
+                    logger.info("✅ Device should be released now")
                 except Exception as e:
                     logger.error(f"Error pausing VAD: {e}")
             
@@ -306,7 +314,7 @@ class MessageHandler:
                 while True:
                     frame = await track.recv()
                     
-                    # Xác định số channels đầu ra (1 hoặc 2)
+                    # ✅ FORCE MONO để tránh channel doubling (1 -> 2 sẽ làm tăng volume gấp đôi)
                     in_channels = 1
                     try:
                         if getattr(frame, "layout", None) is not None:
@@ -316,7 +324,7 @@ class MessageHandler:
                             in_channels = 1 if probe.ndim == 1 else min(probe.shape[0], 2)
                     except Exception:
                         in_channels = 1
-                    out_channels = 1 if in_channels == 1 else 2
+                    out_channels = 1  # ✅ FORCE MONO thay vì: 1 if in_channels == 1 else 2
 
                     # Tạo resampler nếu config thay đổi
                     if resampler is None or resample_cfg != (self.PLAYBACK_OUTPUT_RATE, out_channels):

@@ -613,8 +613,9 @@ class WebRTCManager:
                     mic_gain = MICROPHONE_GAIN
                     noise_gate = MICROPHONE_NOISE_GATE
                 except ImportError:
-                    mic_gain = 1.0
-                    noise_gate = 0
+                    # Default values optimized to reduce idle hiss reaching mobile speaker
+                    mic_gain = 0.3  # Lower default capture gain to reduce background amplification
+                    noise_gate = 0   # Disable hard noise gate to avoid choppy/harsh artifacts
                 
                 # 🎤 Jetson Nano: Tìm USB Audio Device (card 3) cho microphone
                 mic_device_index = None
@@ -651,28 +652,39 @@ class WebRTCManager:
                     except Exception as e:
                         logger.warning(f"Error finding USB mic device: {e}")
                 
-                # Tạo audio track từ microphone sử dụng PyAudio
-                try:
-                    audio_track = PyAudioSourceTrack(
-                        rate=requested_rate,
-                        channels=1,
-                        frames_per_buffer=960,
-                        device_index=mic_device_index,
-                        gain=mic_gain,
-                        noise_gate=noise_gate
-                    )
-                    self.pc.addTrack(audio_track)
-                    self.audio_player = audio_track  # Store reference
-                    logger.info(f"✅ Audio track added using PyAudio (device={mic_device_index}, rate={requested_rate}, gain={mic_gain}x)")
-                except ImportError:
-                    logger.warning("⚠️ PyAudio not installed - microphone will not work")
-                    self.audio_player = None
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not setup audio track with PyAudio: {e}", exc_info=True)
-                    self.audio_player = None
-                    
+                # ✅ Tạo audio track với retry logic nếu device bận
+                max_retries = 3
+                retry_delay = 0.5  # 500ms giữa các lần thử
+                
+                for attempt in range(max_retries):
+                    try:
+                        audio_track = PyAudioSourceTrack(
+                            rate=requested_rate,
+                            channels=1,
+                            frames_per_buffer=960,
+                            device_index=mic_device_index,
+                            gain=mic_gain,
+                            noise_gate=noise_gate
+                        )
+                        self.pc.addTrack(audio_track)
+                        self.audio_player = audio_track  # Store reference
+                        logger.info(f"✅ Audio track added using PyAudio (device={mic_device_index}, rate={requested_rate}, gain={mic_gain}x)")
+                        break  # Success - thoát khỏi retry loop
+                        
+                    except Exception as e:
+                        if "[Errno -9985]" in str(e) and attempt < max_retries - 1:
+                            logger.warning(f"⚠️ Device unavailable (attempt {attempt+1}/{max_retries}), retrying in {retry_delay}s...")
+                            import time as time_module
+                            time_module.sleep(retry_delay)
+                        else:
+                            # Lần thử cuối hoặc lỗi khác
+                            raise
+                            
+            except ImportError:
+                logger.warning("⚠️ PyAudio not installed - microphone will not work")
+                self.audio_player = None
             except Exception as e:
-                logger.warning(f"⚠️ Could not setup audio track: {e}", exc_info=True)
+                logger.warning(f"⚠️ Could not setup audio track with PyAudio: {e}", exc_info=True)
                 self.audio_player = None
                 
         except Exception as e:
