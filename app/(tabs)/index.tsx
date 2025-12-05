@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect } from 'react';
 import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useMQTT } from '../../context/MQTTContext';
+import { useMQTT } from '../../hooks/useMQTT';
 
 // TODO: Thay thế bằng Public Token của bạn
 Mapbox.setAccessToken('pk.eyJ1Ijoia2hhaTAxMDUiLCJhIjoiY21nMzRodzJ2MTdzYzJqbzlsaWI0MnNmNCJ9.91WY_NHdqYgn5mfII1eeTQ');

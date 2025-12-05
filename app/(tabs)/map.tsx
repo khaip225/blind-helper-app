@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useMQTT } from "../../context/MQTTContext";
+import { useMQTT } from '../../hooks/useMQTT';
 
 export default function MapScreen() {
     const router = useRouter();

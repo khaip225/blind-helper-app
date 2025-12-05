@@ -2,16 +2,18 @@ import { useFocusEffect, useNavigation, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { RTCView, mediaDevices } from 'react-native-webrtc';
-import { useMQTT } from '../../context/MQTTContext';
+import { useMQTT } from '../../hooks/useMQTT';
 
-// Import InCallManager for speaker control
+// Dynamically load InCallManager to avoid eslint error
 let InCallManager: any = null;
-try {
-    const incallModule = require('react-native-incall-manager');
-    InCallManager = incallModule?.default || incallModule;
-} catch (err) {
-    console.warn('[CallScreen] react-native-incall-manager not available:', err);
-}
+(async () => {
+    try {
+        InCallManager = await import('react-native-incall-manager');
+        InCallManager = InCallManager?.default || InCallManager;
+    } catch (err) {
+        console.warn('[CallScreen] react-native-incall-manager not available:', err);
+    }
+})();
 
 export default function CallScreen() {
     const { localStream, remoteStream, hangup, callState, answerCall } = useMQTT();

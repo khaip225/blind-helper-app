@@ -6,7 +6,7 @@ import { useRouter } from "expo-router";
 import React from "react";
 import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useMQTT } from "../../context/MQTTContext";
+import { useMQTT } from '../../hooks/useMQTT';
 
 const SosScreen = () => {
   const router = useRouter();

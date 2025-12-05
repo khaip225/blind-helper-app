@@ -1,11 +1,11 @@
 // app/setting.tsx
-import { useMQTT } from "@/context/MQTTContext";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import React from "react";
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useMQTT } from "../../hooks/useMQTT";
 
 export default function SettingScreen() {
   const router = useRouter();

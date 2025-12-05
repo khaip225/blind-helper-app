@@ -4,7 +4,7 @@ import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useMQTT } from "../context/MQTTContext"; // Import hook useMQTT
+import { useMQTT } from '../hooks/useMQTT';
 
 export default function ConnectScreen() {
     const [deviceId, setDeviceId] = useState("");

@@ -613,9 +613,9 @@ class WebRTCManager:
                     mic_gain = MICROPHONE_GAIN
                     noise_gate = MICROPHONE_NOISE_GATE
                 except ImportError:
-                    # Default values optimized to reduce idle hiss reaching mobile speaker
-                    mic_gain = 0.3  # Lower default capture gain to reduce background amplification
-                    noise_gate = 0   # Disable hard noise gate to avoid choppy/harsh artifacts
+                    # Default values optimized for WebRTC (lower gain, enable noise gate)
+                    mic_gain = 1  # Giảm gain xuống 60% để tránh distortion/noise
+                    noise_gate = 0  # Lọc noise dưới 200 (giảm tiếng hú/hiss)
                 
                 # 🎤 Jetson Nano: Tìm USB Audio Device (card 3) cho microphone
                 mic_device_index = None
@@ -713,6 +713,20 @@ class WebRTCManager:
             # 3. Set local description
             logger.info("🔒 Setting local description...")
             await self.pc.setLocalDescription(offer)
+            
+            # ✅ Đợi và kiểm tra local description đã được set
+            import asyncio
+            max_wait = 5  # 5 giây
+            waited = 0
+            while not self.pc.localDescription and waited < max_wait:
+                await asyncio.sleep(0.1)
+                waited += 0.1
+            
+            if not self.pc.localDescription:
+                logger.error("❌ Failed to set local description after 5s")
+                return False
+            
+            logger.info(f"✅ Local description set: {len(self.pc.localDescription.sdp)} chars, state={self.pc.signalingState}")
             
             # 4. Publish offer to mobile via MQTT
             topic = f"device/{self.device_id}/webrtc/offer"
@@ -909,6 +923,11 @@ class WebRTCManager:
             # Check if we have a peer connection with local offer
             if not self.pc:
                 logger.error("❌ No peer connection exists")
+                return False
+            
+            # ✅ Kiểm tra local description trước khi handle answer
+            if not self.pc.localDescription:
+                logger.error("❌ Cannot handle answer: no local description. Call may not have been initiated properly.")
                 return False
             
             if self.pc.signalingState != "have-local-offer":
