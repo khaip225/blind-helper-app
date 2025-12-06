@@ -1,7 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useRef, useState } from 'react';
+import React, { createContext, useEffect, useRef, useState } from 'react';
 import { useMQTTConnection, useWebRTC } from '../hooks';
 import { AlertMessage, DeviceInfo, MQTTContextType } from '../types/mqtt.types';
+import {
+    cancelIncomingCallNotification,
+    initializeNotifications,
+    setupNotificationHandlers,
+    showIncomingCallNotification,
+} from '../utils/expoNotificationManager';
 
 export const MQTTContext = createContext<MQTTContextType | null>(null);
 
@@ -49,6 +55,11 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // WebRTC signaling: Offer from device
         if (endsWith('/webrtc/offer')) {
+            // Show incoming call notification
+            console.log('[Notification] 📱 Showing incoming call notification');
+            await showIncomingCallNotification(savedDeviceId.current || 'Device');
+            
+            // Handle WebRTC offer
             await webrtc.handleOffer(data);
             return;
         }
@@ -82,6 +93,46 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
         publish: mqtt.publish,
     });
 
+    // Initialize notification system
+    useEffect(() => {
+        let unsubscribe: (() => void) | undefined;
+
+        const init = async () => {
+            console.log('[Notification] Initializing notification system...');
+            
+            // Initialize notification system
+            const success = await initializeNotifications();
+            if (success) {
+                console.log('[Notification] ✅ Notification system initialized');
+            } else {
+                console.warn('[Notification] ⚠️ Failed to initialize notification system');
+            }
+
+            // Setup notification action handlers
+            unsubscribe = setupNotificationHandlers(
+                () => {
+                    console.log('[Notification] 📞 Answer button pressed');
+                    // Answer the call
+                    webrtc.answerCall();
+                },
+                () => {
+                    console.log('[Notification] ❌ Reject button pressed');
+                    // Hangup the call
+                    webrtc.hangup();
+                }
+            );
+        };
+
+        init();
+
+        return () => {
+            // Cleanup on unmount
+            if (unsubscribe) {
+                unsubscribe();
+            }
+        };
+    }, [webrtc]); // Add webrtc to dependencies
+
     // Enhanced connect function
     const connect = async (deviceId: string) => {
         savedDeviceId.current = deviceId;
@@ -90,7 +141,12 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     // Enhanced disconnect function
-    const disconnect = () => {
+    const disconnect = async () => {
+        // Cancel any ongoing notifications
+        console.log('[Notification] 🔕 Cancelling notifications');
+        await cancelIncomingCallNotification();
+        
+        // Hangup call and disconnect MQTT
         webrtc.hangup();
         mqtt.disconnect();
     };

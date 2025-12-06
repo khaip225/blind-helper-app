@@ -18,7 +18,17 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "permissions": ["CAMERA", "RECORD_AUDIO", "INTERNET"],
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "INTERNET",
+        "ACCESS_FINE_LOCATION",
+        "MODIFY_AUDIO_SETTINGS",
+        "POST_NOTIFICATIONS",
+        "USE_FULL_SCREEN_INTENT",
+        "VIBRATE",
+        "WAKE_LOCK"
+      ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.thanhkhaii.blindhelperapp"
