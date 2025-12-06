@@ -93,7 +93,7 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
         publish: mqtt.publish,
     });
 
-    // Initialize notification system
+    // Initialize notification system (only once on mount)
     useEffect(() => {
         let unsubscribe: (() => void) | undefined;
 
@@ -110,13 +110,18 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             // Setup notification action handlers
             unsubscribe = setupNotificationHandlers(
-                () => {
-                    console.log('[Notification] 📞 Answer button pressed');
-                    // Answer the call
-                    webrtc.answerCall();
+                async () => {
+                    console.log('[MQTTContext] 📞 Answer callback triggered from notification');
+                    try {
+                        console.log('[MQTTContext] ⏳ Calling webrtc.answerCall()...');
+                        await webrtc.answerCall();
+                        console.log('[MQTTContext] ✅ webrtc.answerCall() completed successfully');
+                    } catch (error) {
+                        console.error('[MQTTContext] ❌ Error calling answerCall:', error);
+                    }
                 },
                 () => {
-                    console.log('[Notification] ❌ Reject button pressed');
+                    console.log('[MQTTContext] ❌ Reject callback triggered from notification');
                     // Hangup the call
                     webrtc.hangup();
                 }
@@ -131,7 +136,8 @@ export const MQTTProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 unsubscribe();
             }
         };
-    }, [webrtc]); // Add webrtc to dependencies
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []); // Empty dependency - initialize only once on mount
 
     // Enhanced connect function
     const connect = async (deviceId: string) => {

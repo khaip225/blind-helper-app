@@ -1,7 +1,7 @@
 import Mapbox from '@rnmapbox/maps';
 import { useRouter } from 'expo-router';
 import React, { useEffect } from 'react';
-import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, AppState, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useMQTT } from '../../hooks/useMQTT';
 
@@ -10,30 +10,36 @@ Mapbox.setAccessToken('pk.eyJ1Ijoia2hhaTAxMDUiLCJhIjoiY21nMzRodzJ2MTdzYzJqbzlsaW
 
 export default function HomeScreen() {
     const router = useRouter();
-    const { isConnected, deviceInfo, alertHistory, callState, answerCall, startCall, hangup } = useMQTT();
+    const { isConnected, deviceInfo, alertHistory, callState, startCall } = useMQTT();
 
     const mapRef = React.useRef<Mapbox.MapView>(null);
     const cameraRef = React.useRef<Mapbox.Camera>(null);
+    const hasNavigatedToIncomingCall = React.useRef(false);
 
     // Lấy deviceId từ AsyncStorage khi component mount
     // If you need the deviceId elsewhere, you can fetch it where required.
 
-    // Xử lý khi có cuộc gọi đến (trạng thái 'receiving')
+    // Xử lý khi có cuộc gọi đến - navigate to incoming-call screen (only once and only if app is active)
     useEffect(() => {
-        if (callState === 'receiving') {
-            Alert.alert(
-                "Yêu cầu SOS!",
-                "Thiết bị đang gửi yêu cầu hỗ trợ khẩn cấp. Bạn có muốn trả lời không?",
-                [
-                    { text: "Từ chối", style: "cancel", onPress: hangup },
-                    { text: "Trả lời", onPress: async () => {
-                        await answerCall();
-                        router.push('/call');
-                    }}
-                ]
-            );
+        if (callState === 'receiving' && !hasNavigatedToIncomingCall.current) {
+            // Only navigate to incoming-call if app is in foreground
+            const appState = AppState.currentState;
+            console.log('[HomeScreen] 📞 Incoming call detected, app state:', appState);
+            
+            if (appState === 'active') {
+                // App is in foreground - navigate to incoming-call screen
+                console.log('[HomeScreen] 📱 App is active, navigating to incoming-call screen');
+                hasNavigatedToIncomingCall.current = true;
+                router.push('/incoming-call');
+            } else {
+                // App is in background - notification will handle it directly (no incoming-call screen)
+                console.log('[HomeScreen] 📱 App is in background, notification actions will handle answer/reject');
+            }
+        } else if (callState !== 'receiving') {
+            // Reset flag when call state changes from receiving
+            hasNavigatedToIncomingCall.current = false;
         }
-    }, [callState, answerCall, hangup, router]);
+    }, [callState, router]);
     
     // Tự động di chuyển bản đồ theo GPS
     useEffect(() => {

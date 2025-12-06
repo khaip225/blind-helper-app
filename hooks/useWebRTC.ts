@@ -29,6 +29,8 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
     const pendingIceCandidates = useRef<any[]>([]);
     const lastPublishedAnswerSdp = useRef<string | null>(null);
     const answeredRef = useRef(false);
+    const isInitializingRef = useRef(false);
+    const lastRingtoneTsRef = useRef<number>(0);
 
     // ✅ Helper function to process pending ICE candidates
     const processPendingIceCandidates = async () => {
@@ -224,6 +226,21 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
             console.log(`[WebRTC] 🧊 ICE connection state: ${state}`);
             if (state === 'failed') {
                 console.error('[WebRTC] ❌ ICE connection failed!');
+                // Attempt a one-time ICE restart to recover without tearing down
+                try {
+                    if (typeof (pc as any).restartIce === 'function') {
+                        console.log('[WebRTC] 🔁 Attempting ICE restart...');
+                        (pc as any).restartIce();
+                        // Re-publish last answer SDP to re-sync signaling after restart
+                        if (lastPublishedAnswerSdp.current) {
+                            console.log('[WebRTC] 📤 Re-publishing last answer SDP after ICE restart');
+                            publish(`mobile/${mobileId}/webrtc/answer`, JSON.stringify({ sdp: lastPublishedAnswerSdp.current, type: 'answer' }));
+                        }
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('[WebRTC] ICE restart unsupported or failed:', e);
+                }
             } else if (state === 'connected' || state === 'completed') {
                 console.log('[WebRTC] ✅ ICE connection established!');
                 // Ensure UI reflects connected state once ICE is established
@@ -296,8 +313,17 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
 
         // Valid only if we have a remote offer
         if (!pc.remoteDescription) {
-            console.warn('[WebRTC] Cannot answer: chưa có remoteDescription (offer). signalingState=', pc.signalingState);
-            return;
+            // In background, offer may arrive slightly after notification tap.
+            // Wait briefly for remoteDescription to be set.
+            console.warn('[WebRTC] No remoteDescription yet. Waiting up to 1500ms...');
+            const start = Date.now();
+            while (!pc.remoteDescription && Date.now() - start < 1500) {
+                await new Promise(res => setTimeout(res, 100));
+            }
+            if (!pc.remoteDescription) {
+                console.warn('[WebRTC] Cannot answer: still no remoteDescription. signalingState=', pc.signalingState);
+                return;
+            }
         }
         if (pc.signalingState === 'have-remote-offer') {
             // proceed
@@ -313,12 +339,23 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
             console.log('[WebRTC] Answer already created - skipping');
             return;
         }
-        // Chỉ cho phép trả lời khi đang ở trạng thái nhận cuộc gọi
-        if (callState !== 'receiving') {
-            console.warn('[WebRTC] Cannot answer, callState=', callState);
-            return;
+        
+        // ✅ REMOVED callState check - it may be reset when app is in background
+        // Instead, rely on signalingState which is maintained by native WebRTC
+        console.log('[WebRTC] 🔍 Current callState:', callState, 'signalingState:', pc.signalingState);
+        
+        // Ensure deviceId is available (fetch from storage if missing)
+        let currentDeviceId = deviceId;
+        if (!currentDeviceId) {
+            try {
+                console.log('[WebRTC] deviceId missing, fetching from AsyncStorage...');
+                currentDeviceId = await (await import('@react-native-async-storage/async-storage')).default.getItem('deviceId');
+                console.log('[WebRTC] Fetched deviceId from storage:', currentDeviceId);
+            } catch (e) {
+                console.warn('[WebRTC] Failed to fetch deviceId from storage:', e);
+            }
         }
-        if (!deviceId) {
+        if (!currentDeviceId) {
             console.warn('[WebRTC] Cannot answer: missing deviceId');
             return;
         }
@@ -330,14 +367,31 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
             await pc.setLocalDescription(answer);
             console.log('[WebRTC] 🔍 signalingState after setLocalDescription:', pc.signalingState);
             answeredRef.current = true;
-            // Sau khi tạo answer, chuyển sang trạng thái 'calling' để ẩn nút Trả lời và tránh spam
-            setCallState('calling');
+            // Mark connected once local answer is set; avoid UI loops
+            setCallState('connected');
+
+            // Ensure MQTT is connected before publishing answer/candidates
+            if (connect) {
+                try {
+                    const idToConnect = currentDeviceId || (await AsyncStorage.getItem('deviceId'));
+                    if (idToConnect) {
+                        console.log('[MQTT] Ensuring connection before publishing answer...');
+                        await connect(idToConnect);
+                        // Small wait to allow broker subscription/connection to settle
+                        await new Promise((r) => setTimeout(r, 500));
+                    }
+                } catch (e) {
+                    console.warn('[MQTT] Failed to ensure connection before publish:', e);
+                }
+            }
             // Only publish if not already published same SDP
             if (lastPublishedAnswerSdp.current !== answer.sdp) {
                 lastPublishedAnswerSdp.current = answer.sdp;
                 console.log('[WebRTC] 📤 Sending answer to device');
                 // ✅ CRITICAL FIX: Mobile publishes using its OWN mobileId!
                 // Device subscribes to `mobile/+/webrtc/answer` to receive from any mobile
+                // Add a short delay in case connection just established
+                await new Promise((r) => setTimeout(r, 300));
                 publish(`mobile/${mobileId}/webrtc/answer`, JSON.stringify(answer));
             } else {
                 console.log('[WebRTC] ⚠️ Skipping duplicate answer publish (same SDP)');
@@ -434,16 +488,36 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
 
     const handleOffer = async (data: any) => {
         console.log('[WebRTC] 📞 Offer received from device');
+        // Prevent re-initializing PC concurrently or for duplicate offers
+        if (isInitializingRef.current) {
+            console.warn('[WebRTC] Offer ignored: initialization in progress');
+            return;
+        }
+        // If we already have a remote description, treat this as a duplicate and ignore
+        if (peerConnection.current && peerConnection.current.remoteDescription) {
+            console.warn('[WebRTC] Offer ignored: remoteDescription already set');
+            return;
+        }
+        isInitializingRef.current = true;
         await initializePeerConnection();
+        isInitializingRef.current = false;
         if (peerConnection.current) {
             try {
                 await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data));
                 await processPendingIceCandidates();
                 setCallState('receiving');
-                
-                // 🔔 Start ringtone for incoming call
-                console.log('[WebRTC] 🔔 Starting ringtone for incoming SOS call...');
-                startRingtone('_BUNDLE_');
+
+                // 🔔 Start ringtone only if not already answered and throttle repeats
+                const now = Date.now();
+                const since = now - (lastRingtoneTsRef.current || 0);
+                const shouldRing = !answeredRef.current && since > 3000; // throttle 3s
+                if (shouldRing) {
+                    lastRingtoneTsRef.current = now;
+                    console.log('[WebRTC] 🔔 Starting ringtone for incoming SOS call...');
+                    startRingtone('_BUNDLE_');
+                } else {
+                    console.log('[WebRTC] ⏭️ Skipping ringtone (already answered or throttled)');
+                }
             } catch (e) {
                 console.error('[WebRTC] Failed to apply offer:', e);
             }

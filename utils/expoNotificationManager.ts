@@ -5,16 +5,19 @@
  */
 
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { router } from 'expo-router';
+import { AppState, Platform } from 'react-native';
+import { startRingtone, stopRingtone } from './audioManager';
 
 // Configure how notifications are handled when app is in foreground
+// Don't show notification banner when app is active - only use incoming-call screen
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
+    shouldShowAlert: false,
+    shouldPlaySound: false,
     shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
+    shouldShowBanner: false,
+    shouldShowList: false,
   }),
 });
 
@@ -57,30 +60,48 @@ export const requestNotificationPermission = async (): Promise<boolean> => {
   }
 };
 
-// Show incoming SOS call notification
+// Show incoming SOS call notification with full-screen intent
 export const showIncomingCallNotification = async (deviceId: string) => {
   try {
-    const notificationId = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: '🆘 Cuộc gọi SOS khẩn cấp',
-        body: `Thiết bị ${deviceId} đang gọi`,
-        sound: 'default',
-        priority: Notifications.AndroidNotificationPriority.MAX,
-        vibrate: [0, 250, 250, 250],
-        data: {
-          type: 'incoming_call',
-          deviceId,
+    // 🔔 Start ringtone using InCallManager (works in both foreground and background)
+    console.log('[Notification] 🔔 Starting ringtone...');
+    startRingtone('_BUNDLE_');
+    
+    // Note: Navigation to incoming-call screen is handled by index.tsx useEffect
+    // when callState changes to 'receiving'. Don't navigate here to avoid duplicate navigation.
+    
+    // Only show notification if app is in background
+    const appState = AppState.currentState;
+    console.log('[Notification] App state:', appState);
+    
+    if (appState !== 'active') {
+      // Show full-screen notification for background/locked screen
+      console.log('[Notification] 🔔 Scheduling full-screen notification (app in background)');
+      const notificationId = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '🆘 Cuộc gọi SOS khẩn cấp',
+          body: `Thiết bị ${deviceId} đang gọi`,
+          sound: 'default',
+          priority: Notifications.AndroidNotificationPriority.MAX,
+          vibrate: [0, 250, 250, 250],
+          data: {
+            type: 'incoming_call',
+            deviceId,
+          },
+          categoryIdentifier: 'incoming_call',
+          ...(Platform.OS === 'android' && {
+            channelId: 'sos-calls',
+          }),
         },
-        categoryIdentifier: 'incoming_call',
-        ...(Platform.OS === 'android' && {
-          channelId: 'sos-calls',
-        }),
-      },
-      trigger: null, // Show immediately
-    });
+        trigger: null, // Show immediately
+      });
 
-    console.log('[Notification] ✅ Incoming call notification displayed:', notificationId);
-    return notificationId;
+      console.log('[Notification] ✅ Incoming call notification displayed:', notificationId);
+      return notificationId;
+    } else {
+      console.log('[Notification] ℹ️ App is active - skipping notification (incoming-call screen shown)');
+      return null;
+    }
   } catch (error) {
     console.error('[Notification] ❌ Failed to show notification:', error);
     return null;
@@ -90,6 +111,10 @@ export const showIncomingCallNotification = async (deviceId: string) => {
 // Cancel incoming call notification
 export const cancelIncomingCallNotification = async () => {
   try {
+    // 🔕 Stop ringtone
+    console.log('[Notification] 🔕 Stopping ringtone...');
+    stopRingtone();
+    
     await Notifications.dismissAllNotificationsAsync();
     console.log('[Notification] ✅ All notifications cancelled');
   } catch (error) {
@@ -100,6 +125,9 @@ export const cancelIncomingCallNotification = async () => {
 // Cancel all notifications
 export const cancelAllNotifications = async () => {
   try {
+    // 🔕 Stop ringtone
+    stopRingtone();
+    
     await Notifications.dismissAllNotificationsAsync();
     console.log('[Notification] ✅ All notifications cancelled');
   } catch (error) {
@@ -107,54 +135,95 @@ export const cancelAllNotifications = async () => {
   }
 };
 
-// Setup notification categories with actions (iOS style)
+// Setup notification categories with actions (iOS and Android)
 const setupNotificationCategories = async () => {
+  // Setup for both iOS and Android
+  await Notifications.setNotificationCategoryAsync('incoming_call', [
+    {
+      identifier: 'answer',
+      buttonTitle: '📞 Trả lời',
+      options: {
+        opensAppToForeground: true,
+      },
+    },
+    {
+      identifier: 'reject',
+      buttonTitle: '❌ Từ chối',
+      options: {
+        opensAppToForeground: false,
+      },
+    },
+  ]);
+  
   if (Platform.OS === 'ios') {
-    await Notifications.setNotificationCategoryAsync('incoming_call', [
-      {
-        identifier: 'answer',
-        buttonTitle: '📞 Trả lời',
-        options: {
-          opensAppToForeground: true,
-        },
-      },
-      {
-        identifier: 'reject',
-        buttonTitle: '❌ Từ chối',
-        options: {
-          opensAppToForeground: false,
-        },
-      },
-    ]);
     console.log('[Notification] ✅ iOS categories set');
+  } else if (Platform.OS === 'android') {
+    console.log('[Notification] ✅ Android categories set');
   }
 };
 
 // Setup notification event handlers
 export const setupNotificationHandlers = (
-  onAnswer: () => void,
+  onAnswer: () => Promise<void>,
   onReject: () => void
 ) => {
-  // Handle notification tap (when user taps on notification)
+  // Handle notification tap or actions
   const notificationSubscription = Notifications.addNotificationResponseReceivedListener(
-    (response) => {
-      console.log('[Notification] Response received:', response);
+    async (response) => {
+      console.log('[Notification] 🔔 Response received:', response.actionIdentifier);
+      console.log('[Notification] 📋 Response data:', response.notification.request.content.data);
       
       const data = response.notification.request.content.data;
+      const actionIdentifier = response.actionIdentifier;
       
       // Check if it's an incoming call notification
       if (data?.type === 'incoming_call') {
-        const actionIdentifier = response.actionIdentifier;
+        console.log('[Notification] ✅ Incoming call notification detected');
         
-        if (actionIdentifier === 'answer' || actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
-          console.log('[Notification] 📞 Answer action');
-          cancelIncomingCallNotification();
-          onAnswer();
+        // Stop ringtone and cancel notification
+        console.log('[Notification] 🔕 Stopping ringtone...');
+        stopRingtone();
+        await cancelIncomingCallNotification();
+        
+        if (actionIdentifier === 'answer') {
+          // User pressed "Trả lời" button from notification (app in background)
+          console.log('[Notification] 📞 Answer button pressed from notification (background)');
+          try {
+            console.log('[Notification] ⏳ Answering call...');
+            await onAnswer(); // Answer the call
+            console.log('[Notification] ✅ Call answered successfully');
+            
+            // Navigate directly to call screen (skip incoming-call screen)
+            console.log('[Notification] 🚀 Navigating to call screen...');
+            router.replace('/(tabs)/call');
+            console.log('[Notification] ✅ Navigation completed');
+          } catch (error) {
+            console.error('[Notification] ❌ Error in answer flow:', error);
+          }
         } else if (actionIdentifier === 'reject') {
-          console.log('[Notification] ❌ Reject action');
-          cancelIncomingCallNotification();
+          // User pressed "Từ chối" button from notification
+          console.log('[Notification] ❌ Reject button pressed from notification');
           onReject();
+          // Navigate back to home after rejecting
+          router.replace('/(tabs)');
+        } else {
+          // User tapped notification body (not a button) - also answer and go to call
+          console.log('[Notification] 📱 Notification body tapped - answering call (background)');
+          try {
+            console.log('[Notification] ⏳ Answering call...');
+            await onAnswer(); // Answer the call
+            console.log('[Notification] ✅ Call answered successfully');
+            
+            // Navigate directly to call screen (skip incoming-call screen)
+            console.log('[Notification] 🚀 Navigating to call screen...');
+            router.replace('/(tabs)/call');
+            console.log('[Notification] ✅ Navigation completed');
+          } catch (error) {
+            console.error('[Notification] ❌ Error in answer flow:', error);
+          }
         }
+      } else {
+        console.log('[Notification] ⚠️ Not an incoming call notification, ignoring');
       }
     }
   );
