@@ -31,6 +31,7 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
     const answeredRef = useRef(false);
     const isInitializingRef = useRef(false);
     const lastRingtoneTsRef = useRef<number>(0);
+    const deviceIdRef = useRef<string | null>(deviceId || null);
 
     // ✅ Helper function to process pending ICE candidates
     const processPendingIceCandidates = async () => {
@@ -183,7 +184,7 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
         
         // ICE candidate handler
         const onIceCandidate = (event: any) => {
-            if (event?.candidate && deviceId) {
+            if (event?.candidate) {
                 const cand = event.candidate;
                 const candStr = cand.candidate || '';
                 
@@ -345,12 +346,13 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
         console.log('[WebRTC] 🔍 Current callState:', callState, 'signalingState:', pc.signalingState);
         
         // Ensure deviceId is available (fetch from storage if missing)
-        let currentDeviceId = deviceId;
+        let currentDeviceId = deviceId || deviceIdRef.current;
         if (!currentDeviceId) {
             try {
                 console.log('[WebRTC] deviceId missing, fetching from AsyncStorage...');
                 currentDeviceId = await (await import('@react-native-async-storage/async-storage')).default.getItem('deviceId');
                 console.log('[WebRTC] Fetched deviceId from storage:', currentDeviceId);
+                if (currentDeviceId) deviceIdRef.current = currentDeviceId; // Store in ref for session
             } catch (e) {
                 console.warn('[WebRTC] Failed to fetch deviceId from storage:', e);
             }
