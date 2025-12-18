@@ -32,6 +32,8 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
     const isInitializingRef = useRef(false);
     const lastRingtoneTsRef = useRef<number>(0);
     const deviceIdRef = useRef<string | null>(deviceId || null);
+    const keepaliveIntervalRef = useRef<number | null>(null);
+    const lastKeepaliveRef = useRef<number>(0);
 
     // ✅ Helper function to process pending ICE candidates
     const processPendingIceCandidates = async () => {
@@ -163,7 +165,9 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
                     setCallState('connected');
                     
                     // 🔊 Initialize InCallManager (but don't force speaker - let call.tsx handle it)
+                    console.log('[Audio] 🔍 InCallManager available?', InCallManager ? 'YES' : 'NO');
                     console.log('[Audio] 🔍 InCallManager type:', typeof InCallManager);
+                    console.log('[Audio] 🔍 InCallManager.start type:', typeof InCallManager?.start);
                     
                     if (InCallManager && typeof InCallManager.start === 'function') {
                         try {
@@ -174,7 +178,10 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
                             console.error('[Audio] ❌ Failed to start InCallManager:', err);
                         }
                     } else {
-                        console.warn('[Audio] ⚠️ InCallManager not available');
+                        console.warn('[Audio] ⚠️ InCallManager not available or start is not a function');
+                        if (!InCallManager) {
+                            console.warn('[Audio] ⚠️ InCallManager is null/undefined');
+                        }
                     }
                 }
             } catch (err) {
@@ -242,10 +249,15 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
                 } catch (e) {
                     console.warn('[WebRTC] ICE restart unsupported or failed:', e);
                 }
-            } else if (state === 'connected' || state === 'completed') {
+            } else if (state === 'connected') {
                 console.log('[WebRTC] ✅ ICE connection established!');
                 // Ensure UI reflects connected state once ICE is established
                 setCallState((prev) => (prev !== 'connected' ? 'connected' : prev));
+                // Start keepalive to maintain NAT bindings (only when transitioning to connected)
+                startKeepalive();
+            } else if (state === 'completed') {
+                console.log('[WebRTC] 🏁 ICE connection completed!');
+                // Don't start keepalive again - already started when connected
             }
         };
 
@@ -259,15 +271,165 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
             }
         };
 
+        const onIceGatheringStateChange = () => {
+            const state = pc.iceGatheringState;
+            console.log(`[WebRTC] 📡 ICE gathering state: ${state}`);
+            
+            if (state === 'complete') {
+                // Log local description để see tất cả candidates
+                if (pc.localDescription) {
+                    const sdp = pc.localDescription.sdp;
+                    const candidateLines = sdp.split('\n').filter(line => line.includes('a=candidate'));
+                    console.log(`[WebRTC] 🏁 ICE gathering complete - ${candidateLines.length} candidates in SDP`);
+                    
+                    // Count by type
+                    const hostCount = candidateLines.filter(l => l.includes('typ host')).length;
+                    const srflxCount = candidateLines.filter(l => l.includes('typ srflx')).length;
+                    const relayCount = candidateLines.filter(l => l.includes('typ relay')).length;
+                    console.log(`[WebRTC] 📊 Candidates breakdown: HOST=${hostCount}, SRFLX=${srflxCount}, RELAY=${relayCount}`);
+                    
+                    if (relayCount === 0) {
+                        console.warn('[WebRTC] ⚠️ WARNING: No RELAY candidates! TURN server may not be working.');
+                    }
+                } else {
+                    console.warn('[WebRTC] ⚠️ No local description after ICE gathering complete');
+                }
+            }
+        };
+
         // Attach handlers
         (pc as any).ontrack = onTrack;
         (pc as any).onicecandidate = onIceCandidate;
         (pc as any).oniceconnectionstatechange = onIceConnectionStateChange;
         (pc as any).onconnectionstatechange = onConnectionStateChange;
+        (pc as any).onicegatheringstatechange = onIceGatheringStateChange;
         
         pcTrackHandlerRef.current = onTrack;
         pcIceHandlerRef.current = onIceCandidate;
     };
+
+    // ✅ STUN Keepalive: Send periodic checks to maintain NAT bindings
+    const startKeepalive = useCallback(() => {
+        // Prevent duplicate keepalive timers
+        if (keepaliveIntervalRef.current) {
+            console.log('[WebRTC] ⏭️ Keepalive already running, skipping');
+            return;
+        }
+
+        console.log('[WebRTC] 🔄 Starting STUN keepalive (every 20 seconds)...');
+        
+        keepaliveIntervalRef.current = setInterval(async () => {
+            if (!peerConnection.current) {
+                console.log('[WebRTC] ⏸️ Keepalive: No peer connection, skipping');
+                return;
+            }
+
+            const pc = peerConnection.current;
+            const iceState = pc.iceConnectionState;
+            const connState = pc.connectionState;
+
+            console.log(`[WebRTC] 💓 Keepalive check - ICE: ${iceState}, Connection: ${connState}`);
+
+            // Check if connection is healthy
+            if (iceState === 'connected' || iceState === 'completed') {
+                try {
+                    // Use getStats to check connection health
+                    const stats = await pc.getStats();
+                    let bytesReceived = 0;
+                    let bytesSent = 0;
+                    let candidatePairFound = false;
+                    let allCandidatePairs: any[] = [];
+
+                    stats.forEach((report: any) => {
+                        if (report.type === 'candidate-pair') {
+                            allCandidatePairs.push({
+                                state: report.state,
+                                local: report.localCandidateId,
+                                remote: report.remoteCandidateId,
+                                bytesReceived: report.bytesReceived || 0,
+                                bytesSent: report.bytesSent || 0,
+                                priority: report.priority
+                            });
+                            
+                            if (report.state === 'succeeded') {
+                                candidatePairFound = true;
+                                bytesReceived += report.bytesReceived || 0;
+                                bytesSent += report.bytesSent || 0;
+                            }
+                        }
+                    });
+
+                    const now = Date.now();
+                    const timeSinceLastKeepalive = now - lastKeepaliveRef.current;
+                    lastKeepaliveRef.current = now;
+
+                    if (candidatePairFound) {
+                        console.log(`[WebRTC] ✅ Keepalive OK - RX: ${bytesReceived} bytes, TX: ${bytesSent} bytes`);
+                    } else {
+                        console.warn('[WebRTC] ⚠️ Keepalive: No active candidate pair found!');
+                        console.warn(`[WebRTC] 📊 All candidate pairs (${allCandidatePairs.length}):`, 
+                            allCandidatePairs.map(p => `${p.state}:${p.local?.substring(0,20)}`).join(', '));
+                        
+                        // Log local and remote candidates để debug
+                        const localCandidates: any[] = [];
+                        const remoteCandidates: any[] = [];
+                        stats.forEach((report: any) => {
+                            if (report.type === 'local-candidate') {
+                                localCandidates.push(`${report.candidateType}:${report.protocol}:${report.address}:${report.port}`);
+                            }
+                            if (report.type === 'remote-candidate') {
+                                remoteCandidates.push(`${report.candidateType}:${report.protocol}:${report.address}:${report.port}`);
+                            }
+                        });
+                        console.warn(`[WebRTC] 📡 Local candidates (${localCandidates.length}):`, localCandidates.slice(0, 3));
+                        console.warn(`[WebRTC] 📡 Remote candidates (${remoteCandidates.length}):`, remoteCandidates.slice(0, 3));
+                    }
+
+                    // Log stats every 60 seconds (every 3rd keepalive)
+                    if (timeSinceLastKeepalive > 55000 || lastKeepaliveRef.current === now) {
+                        console.log('[WebRTC] 📊 Connection stats:');
+                        console.log(`   - ICE state: ${iceState}`);
+                        console.log(`   - Connection state: ${connState}`);
+                        console.log(`   - Bytes received: ${bytesReceived}`);
+                        console.log(`   - Bytes sent: ${bytesSent}`);
+                    }
+                } catch (error) {
+                    console.warn('[WebRTC] ⚠️ Keepalive getStats error:', error);
+                }
+            } else if (iceState === 'disconnected') {
+                console.warn('[WebRTC] ⚠️ ICE disconnected! Attempting recovery...');
+                
+                // Try ICE restart if supported
+                try {
+                    if (typeof (pc as any).restartIce === 'function') {
+                        console.log('[WebRTC] 🔁 Triggering ICE restart...');
+                        (pc as any).restartIce();
+                    } else {
+                        console.warn('[WebRTC] ⚠️ ICE restart not supported on this platform');
+                    }
+                } catch (error) {
+                    console.error('[WebRTC] ❌ ICE restart failed:', error);
+                }
+            } else if (iceState === 'failed' || connState === 'failed') {
+                console.error('[WebRTC] ❌ Connection failed! Keepalive cannot recover.');
+                // Stop keepalive as connection is dead
+                if (keepaliveIntervalRef.current) {
+                    clearInterval(keepaliveIntervalRef.current);
+                    keepaliveIntervalRef.current = null;
+                }
+            }
+        }, 20000); // Check every 20 seconds
+
+        console.log('[WebRTC] ✅ Keepalive started');
+    }, []);
+
+    const stopKeepalive = useCallback(() => {
+        if (keepaliveIntervalRef.current) {
+            clearInterval(keepaliveIntervalRef.current);
+            keepaliveIntervalRef.current = null;
+            console.log('[WebRTC] 🛑 Keepalive stopped');
+        }
+    }, []);
 
     const startCall = async () => {
         if (callState !== 'idle') {
@@ -413,6 +575,9 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
             console.warn('[Audio] Failed to stop ringtone:', err);
         }
         
+        // ✅ Stop keepalive timer
+        stopKeepalive();
+        
         // 🔊 Disable speakerphone and stop call manager
         if (InCallManager) {
             try {
@@ -486,10 +651,13 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
         setCallState('idle');
         
         console.log('[WebRTC] ✅ Hangup complete - all resources released');
-    }, [localStream, remoteStream]);
+    }, [localStream, remoteStream, stopKeepalive]);
 
     const handleOffer = async (data: any) => {
         console.log('[WebRTC] 📞 Offer received from device');
+        console.log('[WebRTC] 🔍 Offer data:', JSON.stringify(data).substring(0, 200));
+        console.log('[WebRTC] 🔍 Offer has SDP?', !!data?.sdp);
+        
         // Prevent re-initializing PC concurrently or for duplicate offers
         if (isInitializingRef.current) {
             console.warn('[WebRTC] Offer ignored: initialization in progress');
@@ -505,7 +673,21 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
         isInitializingRef.current = false;
         if (peerConnection.current) {
             try {
+                console.log('[WebRTC] 🔍 Setting remote description (offer)...');
+                console.log('[WebRTC] 🔍 Peer connection state:', peerConnection.current.signalingState);
+                console.log('[WebRTC] 🔍 ontrack handler assigned?', !!(peerConnection.current as any).ontrack);
+                
                 await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data));
+                
+                console.log('[WebRTC] ✅ Remote description set successfully');
+                console.log('[WebRTC] 🔍 Signaling state after:', peerConnection.current.signalingState);
+                console.log('[WebRTC] 🔍 Checking remote tracks...');
+                const receivers = (peerConnection.current as any).getReceivers?.() || [];
+                console.log('[WebRTC] 🔍 Number of receivers:', receivers.length);
+                receivers.forEach((receiver: any, index: number) => {
+                    console.log(`[WebRTC] 🔍 Receiver ${index}:`, receiver.track?.kind, 'id=', receiver.track?.id);
+                });
+                
                 await processPendingIceCandidates();
                 setCallState('receiving');
 
@@ -528,7 +710,20 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
 
     const handleAnswer = async (data: any) => {
         console.log('[WebRTC] 📥 Answer received from device');
-        if (peerConnection.current && peerConnection.current.signalingState === 'have-local-offer') {
+        if (!peerConnection.current) {
+            console.warn('[WebRTC] Ignoring answer; no peer connection');
+            return;
+        }
+        
+        const currentState = peerConnection.current.signalingState;
+        console.log('[WebRTC] 🔍 Current signaling state:', currentState);
+        
+        if (currentState === 'stable') {
+            console.log('[WebRTC] ⏭️ Ignoring answer; already stable (negotiation complete)');
+            return;
+        }
+        
+        if (currentState === 'have-local-offer') {
             try {
                 await peerConnection.current.setRemoteDescription(new RTCSessionDescription(data));
                 await processPendingIceCandidates();
@@ -536,7 +731,7 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
                 console.error('[WebRTC] Failed to apply answer:', e);
             }
         } else {
-            console.warn('[WebRTC] Ignoring answer; no matching local offer');
+            console.warn('[WebRTC] Ignoring answer; unexpected state:', currentState);
         }
     };
 
@@ -559,6 +754,13 @@ export const useWebRTC = ({ mobileId, deviceId, publish, connect }: UseWebRTCPro
             console.error('[WebRTC] ❌ Failed to add candidate:', e);
         }
     };
+
+    // ✅ Cleanup keepalive on unmount
+    useCallback(() => {
+        return () => {
+            stopKeepalive();
+        };
+    }, [stopKeepalive]);
 
     return {
         localStream,

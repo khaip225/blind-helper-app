@@ -38,21 +38,27 @@ export default function CallScreen() {
             initialSpeakerSetRef.current = true;
             
             // Enable speaker by default on first connection
-            if (InCallManager) {
-                try {
-                    InCallManager.setForceSpeakerphoneOn(true);
-                    console.log('🔊 [CallScreen] Initial speaker: ON');
-                } catch (e) {
-                    console.warn('⚠️ [CallScreen] InCallManager error:', e);
+            // Add small delay to ensure InCallManager session is started (from useWebRTC onTrack)
+            const enableSpeaker = () => {
+                if (InCallManager) {
+                    try {
+                        InCallManager.setForceSpeakerphoneOn(true);
+                        console.log('🔊 [CallScreen] Initial speaker: ON');
+                    } catch (e) {
+                        console.warn('⚠️ [CallScreen] InCallManager error:', e);
+                    }
+                } else if (Platform.OS === 'android') {
+                    try {
+                        (mediaDevices as any).setSpeakerphoneOn?.(true);
+                        console.log('🔊 [CallScreen] Initial speaker: ON');
+                    } catch (e) {
+                        console.warn('⚠️ [CallScreen] setSpeakerphoneOn not available:', e);
+                    }
                 }
-            } else if (Platform.OS === 'android') {
-                try {
-                    (mediaDevices as any).setSpeakerphoneOn?.(true);
-                    console.log('🔊 [CallScreen] Initial speaker: ON');
-                } catch (e) {
-                    console.warn('⚠️ [CallScreen] setSpeakerphoneOn not available:', e);
-                }
-            }
+            };
+            
+            // Delay 300ms to ensure InCallManager.start() has completed
+            setTimeout(enableSpeaker, 300);
             
             // Ensure audio tracks are enabled
             try {
